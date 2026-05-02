@@ -15,12 +15,14 @@ async def run_post_ingest_pipeline(
     *,
     watchtower_evaluator: WatchtowerEvaluator | None = None,
     intervention_cooldown_seconds: int = 300,
+    use_watchtower_graph: bool | None = None,
 ) -> None:
     decision = await run_watchtower(
         repo,
         delivery_id,
         evaluator=watchtower_evaluator,
         ingest_idempotency_key=idempotency_key,
+        use_watchtower_graph=use_watchtower_graph,
     )
     if decision is not None:
         await run_intervention_planner(

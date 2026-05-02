@@ -25,6 +25,7 @@ async def run_one_cycle(
     sqs: SqsClient,
     repo: EventRepository,
     watchtower_evaluator: WatchtowerEvaluator | None,
+    use_watchtower_graph: bool | None = None,
 ) -> int:
     """Receive up to 10 messages, process; returns count handled (deleted or DLQ)."""
     await sqs.ensure_queue_urls()
@@ -44,6 +45,7 @@ async def run_one_cycle(
                 max_receive_before_dlq=settings.sqs_max_receive_before_dlq,
                 intervention_cooldown_seconds=settings.intervention_cooldown_seconds,
                 watchtower_evaluator=watchtower_evaluator,
+                use_watchtower_graph=use_watchtower_graph,
             )
             n += 1
         except Exception:
@@ -75,6 +77,7 @@ async def run_forever(settings: Settings | None = None) -> None:
                 sqs=sqs_c,
                 repo=repo,
                 watchtower_evaluator=w_ev,
+                use_watchtower_graph=s.watchtower_graph_enabled,
             )
             await asyncio.sleep(0)
     finally:

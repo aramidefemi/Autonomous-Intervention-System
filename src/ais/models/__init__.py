@@ -1,6 +1,7 @@
 from ais.models.contracts import (
     AgentDecision,
     Delivery,
+    GraphTraceStep,
     InterventionPlan,
     InterventionType,
     IssueType,
@@ -9,11 +10,13 @@ from ais.models.contracts import (
     VoiceSessionOutcome,
     WatchtowerAction,
     WatchtowerDecision,
+    WatchtowerGraphTrace,
 )
 
 __all__ = [
     "AgentDecision",
     "Delivery",
+    "GraphTraceStep",
     "InterventionPlan",
     "InterventionType",
     "IssueType",
@@ -22,4 +25,5 @@ __all__ = [
     "VoiceSessionOutcome",
     "WatchtowerAction",
     "WatchtowerDecision",
+    "WatchtowerGraphTrace",
 ]

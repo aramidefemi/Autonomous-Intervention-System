@@ -58,6 +58,8 @@ def _watchtower_doc(decision: WatchtowerDecision) -> dict[str, Any]:
         d["action_reason"] = decision.action_reason
     if decision.ingest_idempotency_key:
         d["ingest_idempotency_key"] = decision.ingest_idempotency_key
+    if decision.graph_trace is not None:
+        d["graph_trace"] = decision.graph_trace.model_dump(mode="json")
     return d
 
 

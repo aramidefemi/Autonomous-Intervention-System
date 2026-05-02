@@ -101,6 +101,8 @@ class InMemoryEventRepository(EventRepository):
             d["action_reason"] = decision.action_reason
         if decision.ingest_idempotency_key:
             d["ingest_idempotency_key"] = decision.ingest_idempotency_key
+        if decision.graph_trace is not None:
+            d["graph_trace"] = decision.graph_trace.model_dump(mode="json")
         self._watchtower.append(d)
 
     async def get_watchtower_decision_for_ingest_key(

@@ -39,6 +39,8 @@ class Settings(BaseSettings):
     )
     # One extra INFO line per /v1/events (delivery, trace, type, idem) for terminal demos
     event_trace_log: bool = Field(default=False, alias="AIS_EVENT_TRACE_LOG")
+    # LangGraph watchtower orchestration (rules gate + optional LLM subgraph); default legacy path
+    watchtower_graph_enabled: bool = Field(default=False, alias="AIS_WATCHTOWER_GRAPH")
     # NVIDIA NIM (OpenAI-compatible); optional — watchtower uses rules when unset
     nvidia_api_key: str | None = Field(default=None, alias="NVIDIA_API_KEY")
     nvidia_base_url: str = Field(
@@ -132,6 +134,15 @@ class Settings(BaseSettings):
     @field_validator("event_trace_log", mode="before")
     @classmethod
     def event_trace_log_truthy(cls, v: object) -> bool:
+        if isinstance(v, bool):
+            return v
+        if v is None or v == "":
+            return False
+        return str(v).strip().lower() in ("1", "true", "yes", "on")
+
+    @field_validator("watchtower_graph_enabled", mode="before")
+    @classmethod
+    def watchtower_graph_truthy(cls, v: object) -> bool:
         if isinstance(v, bool):
             return v
         if v is None or v == "":

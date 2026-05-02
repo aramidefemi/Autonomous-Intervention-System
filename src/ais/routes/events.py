@@ -180,6 +180,9 @@ async def post_delivery_event(request: Request, repo: Repo) -> IngestResponse:
                 idem_key,
                 watchtower_evaluator=ev,
                 intervention_cooldown_seconds=cooldown,
+                use_watchtower_graph=(
+                    st.watchtower_graph_enabled if st is not None else None
+                ),
             )
         processed = (not out.duplicate) or out.resume_pipeline
         logger.info(

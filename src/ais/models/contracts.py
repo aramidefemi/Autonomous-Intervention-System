@@ -89,6 +89,35 @@ class AgentDecision(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class GraphTraceStep(BaseModel):
+    """One LangGraph node execution record (persisted under WatchtowerDecision.graph_trace)."""
+
+    node_name: str = Field(..., min_length=1, alias="nodeName")
+    agent_name: str | None = Field(default=None, alias="agentName")
+    started_at: datetime = Field(..., alias="startedAt")
+    ended_at: datetime = Field(..., alias="endedAt")
+    input_summary: str = Field(default="", alias="inputSummary")
+    output_summary: str = Field(default="", alias="outputSummary")
+    source: str = Field(
+        default="rules",
+        description="rules | llm | tool",
+    )
+    extra: dict[str, Any] | None = None
+
+    model_config = {"populate_by_name": True}
+
+
+class WatchtowerGraphTrace(BaseModel):
+    graph_name: str = Field(default="watchtower", alias="graphName")
+    graph_version: str = Field(default="1", alias="graphVersion")
+    thread_id: str | None = Field(default=None, alias="threadId")
+    run_id: str | None = Field(default=None, alias="runId")
+    steps: list[GraphTraceStep] = Field(default_factory=list)
+    route_taken: list[str] | None = Field(default=None, alias="routeTaken")
+
+    model_config = {"populate_by_name": True}
+
+
 class WatchtowerDecision(BaseModel):
     """Rule- or LLM-backed health/risk assessment for a delivery (append-only history)."""
 
@@ -114,6 +143,11 @@ class WatchtowerDecision(BaseModel):
         default=None,
         alias="ingestIdempotencyKey",
         description="When set, dedupes replay of the same queued ingest envelope.",
+    )
+    graph_trace: WatchtowerGraphTrace | None = Field(
+        default=None,
+        alias="graphTrace",
+        description="Optional LangGraph run trace (same watchtower row; additive).",
     )
 
     model_config = {"populate_by_name": True}

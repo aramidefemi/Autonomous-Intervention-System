@@ -38,6 +38,7 @@ async def process_ingress_message(
     max_receive_before_dlq: int,
     intervention_cooldown_seconds: int = 300,
     watchtower_evaluator: WatchtowerEvaluator | None = None,
+    use_watchtower_graph: bool | None = None,
 ) -> ProcessResult:
     """Normalize + persist; invalid validation → DLQ; transient error → requeue via visibility."""
     ingress_url = sqs.ingress_queue_url
@@ -73,6 +74,7 @@ async def process_ingress_message(
                         envelope.idempotency_key,
                         watchtower_evaluator=watchtower_evaluator,
                         intervention_cooldown_seconds=intervention_cooldown_seconds,
+                        use_watchtower_graph=use_watchtower_graph,
                     )
                 logger.info(
                     "worker ingested delivery_id=%s duplicate=%s idempotency_key=%s",
