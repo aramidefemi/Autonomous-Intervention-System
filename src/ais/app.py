@@ -5,6 +5,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 
 from ais.config import Settings
 from ais.llm import watchtower_evaluator_from_settings
+from ais.logging_config import CorrelationIdMiddleware, configure_logging
 from ais.repositories import EventRepository, MongoEventRepository
 from ais.routes import events as events_routes
 from ais.routes import health as health_routes
@@ -21,6 +22,7 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        configure_logging()
         app.state.queue_ingress = bool(s.queue_ingress)
         app.state.sqs_client = None
         if s.queue_ingress:
@@ -53,4 +55,5 @@ def create_app(
     app.include_router(health_routes.router)
     app.include_router(events_routes.router)
     app.include_router(voice_routes.router)
+    app.add_middleware(CorrelationIdMiddleware)
     return app

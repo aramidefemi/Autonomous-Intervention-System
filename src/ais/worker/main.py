@@ -9,6 +9,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 
 from ais.config import Settings
 from ais.llm import watchtower_evaluator_from_settings
+from ais.logging_config import configure_logging
 from ais.repositories import EventRepository, MongoEventRepository
 from ais.sqs.client import SqsClient
 from ais.watchtower.evaluator import WatchtowerEvaluator
@@ -81,5 +82,5 @@ async def run_forever(settings: Settings | None = None) -> None:
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO)
+    configure_logging()
     asyncio.run(run_forever())

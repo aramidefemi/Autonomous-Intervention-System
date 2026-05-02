@@ -36,8 +36,6 @@ async def run_watchtower(
         events=events,
     )
     if ingest_idempotency_key:
-        decision = decision.model_copy(
-            update={"ingest_idempotency_key": ingest_idempotency_key}
-        )
+        decision = decision.model_copy(update={"ingest_idempotency_key": ingest_idempotency_key})
     await repo.append_watchtower_decision(decision)
     return decision

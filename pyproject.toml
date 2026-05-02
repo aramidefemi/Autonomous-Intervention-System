@@ -24,6 +24,7 @@ dev = [
 
 [project.scripts]
 ais-worker = "ais.worker.main:main"
+ais-demo = "ais.demo.cli:main"
 
 [build-system]
 requires = ["setuptools>=61"]

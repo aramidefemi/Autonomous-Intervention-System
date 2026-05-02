@@ -43,9 +43,7 @@ def test_parse_watchtower_llm_json_ok(raw: str, risk: RiskLevel, reason: str) ->
 
 
 def test_parse_watchtower_llm_json_bad() -> None:
-    assert (
-        parse_watchtower_llm_json("not json", delivery_id="D1", signals_snapshot={}) is None
-    )
+    assert parse_watchtower_llm_json("not json", delivery_id="D1", signals_snapshot={}) is None
 
 
 def test_nvidia_evaluator_requires_client() -> None:

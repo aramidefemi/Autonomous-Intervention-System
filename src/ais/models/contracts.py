@@ -38,6 +38,11 @@ class Delivery(BaseModel):
         alias="openInterventionId",
         description="Reserved for in-flight voice/intervention linkage.",
     )
+    revision: int = Field(
+        default=0,
+        ge=0,
+        description="Increments on delivery mutation (optimistic locking / concurrency).",
+    )
 
     model_config = {"populate_by_name": True}
 

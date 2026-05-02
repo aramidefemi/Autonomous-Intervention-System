@@ -168,6 +168,7 @@ class MongoEventRepository(EventRepository):
                     "open_pipeline_started_at": started,
                 },
                 "$setOnInsert": {"delivery_id": event.delivery_id, "last_processed_seq": 0},
+                "$inc": {"revision": 1},
             },
             upsert=True,
         )
@@ -266,7 +267,7 @@ class MongoEventRepository(EventRepository):
             },
             {
                 "$unset": {"open_pipeline_idempotency_key": "", "open_pipeline_started_at": ""},
-                "$inc": {"last_processed_seq": 1},
+                "$inc": {"last_processed_seq": 1, "revision": 1},
             },
         )
 
@@ -326,11 +327,13 @@ class MongoEventRepository(EventRepository):
 
     async def append_voice_outcome(self, outcome: VoiceSessionOutcome) -> None:
         await self._voice.insert_one(_voice_outcome_doc(outcome))
+        await self._deliveries.update_one(
+            {"delivery_id": outcome.delivery_id},
+            {"$inc": {"revision": 1}},
+        )
 
     async def list_voice_outcomes(self, delivery_id: str, limit: int = 20) -> list[dict]:
-        cur = (
-            self._voice.find({"delivery_id": delivery_id}).sort("received_at", -1).limit(limit)
-        )
+        cur = self._voice.find({"delivery_id": delivery_id}).sort("received_at", -1).limit(limit)
         out: list[dict] = []
         async for doc in cur:
             doc.pop("_id", None)

@@ -27,9 +27,7 @@ async def run_intervention_planner(
     if candidate is None:
         return None
     if ingest_idempotency_key:
-        candidate = candidate.model_copy(
-            update={"ingest_idempotency_key": ingest_idempotency_key}
-        )
+        candidate = candidate.model_copy(update={"ingest_idempotency_key": ingest_idempotency_key})
     last_at = await repo.last_intervention_planned_at(decision.delivery_id)
     if is_within_cooldown(t, last_at, cooldown_seconds):
         return None

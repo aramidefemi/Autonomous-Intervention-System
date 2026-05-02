@@ -1,15 +1,19 @@
 import json
+import logging
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, ValidationError
 
+from ais.concurrency.revision import expected_revision_allows_ingest
 from ais.ingest import idempotency_key_from_parts, normalize_ingest_body
 from ais.ingest.ingress_envelope import envelope_to_json
+from ais.logging_config import get_correlation_id
 from ais.pipeline import run_post_ingest_pipeline
 from ais.repositories import EventRepository, IngestOutcome
 
 router = APIRouter(prefix="/v1", tags=["events"])
+logger = logging.getLogger(__name__)
 
 
 def get_event_repository(request: Request) -> EventRepository:
@@ -20,6 +24,39 @@ def get_event_repository(request: Request) -> EventRepository:
 
 
 Repo = Annotated[EventRepository, Depends(get_event_repository)]
+
+
+def _parse_expected_revision(request: Request) -> int | None:
+    raw = request.headers.get("X-Expected-Delivery-Revision")
+    if raw is None or raw == "":
+        return None
+    try:
+        return int(raw)
+    except ValueError:
+        raise HTTPException(
+            status_code=422,
+            detail="Invalid X-Expected-Delivery-Revision",
+        ) from None
+
+
+async def _guard_delivery_revision(
+    repo: EventRepository,
+    delivery_id: str,
+    request: Request,
+) -> None:
+    expected = _parse_expected_revision(request)
+    if expected is None:
+        return
+    existing = await repo.get_delivery(delivery_id)
+    cur = existing.revision if existing else None
+    if not expected_revision_allows_ingest(expected=expected, current_revision=cur):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "revision_conflict",
+                "currentRevision": cur if existing is not None else 0,
+            },
+        )
 
 
 class IngestResponse(BaseModel):
@@ -71,12 +108,23 @@ async def post_delivery_event(request: Request, repo: Repo) -> IngestResponse:
     except ValidationError as e:
         raise HTTPException(status_code=422, detail=e.errors()) from e
 
+    await _guard_delivery_revision(repo, event.delivery_id, request)
+
     if getattr(request.app.state, "queue_ingress", False):
         sqs = getattr(request.app.state, "sqs_client", None)
         if sqs is None:
             raise HTTPException(status_code=503, detail="SQS ingress not configured")
-        msg_body = envelope_to_json(data, idem_key)
+        msg_body = envelope_to_json(
+            data,
+            idem_key,
+            correlation_id=get_correlation_id(),
+        )
         mid = await sqs.send_ingress_json(msg_body)
+        logger.info(
+            "queued ingress delivery_id=%s idempotency_key=%s",
+            event.delivery_id,
+            idem_key,
+        )
         return IngestResponse(
             accepted=True,
             duplicate=False,
@@ -104,6 +152,13 @@ async def post_delivery_event(request: Request, repo: Repo) -> IngestResponse:
             intervention_cooldown_seconds=cooldown,
         )
     processed = (not out.duplicate) or out.resume_pipeline
+    logger.info(
+        "ingested delivery_id=%s duplicate=%s processed=%s idempotency_key=%s",
+        out.delivery_id,
+        out.duplicate,
+        processed,
+        out.idempotency_key,
+    )
     return IngestResponse(
         accepted=processed,
         duplicate=out.duplicate,

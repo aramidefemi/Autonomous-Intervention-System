@@ -1,6 +1,5 @@
 from datetime import UTC, datetime
 
-from ais.recovery.checkpoint import delivery_has_stale_open_pipeline
 from ais.models import (
     Delivery,
     InterventionPlan,
@@ -8,6 +7,7 @@ from ais.models import (
     VoiceSessionOutcome,
     WatchtowerDecision,
 )
+from ais.recovery.checkpoint import delivery_has_stale_open_pipeline
 from ais.repositories.contracts import EventRepository, IngestOutcome
 
 
@@ -34,10 +34,7 @@ class InMemoryEventRepository(EventRepository):
         if idempotency_key in self._events:
             first = self._events[idempotency_key]
             row = self._deliveries.get(event.delivery_id)
-            resume = (
-                row is not None
-                and row.get("open_pipeline_idempotency_key") == idempotency_key
-            )
+            resume = row is not None and row.get("open_pipeline_idempotency_key") == idempotency_key
             return IngestOutcome(
                 duplicate=True,
                 trace_id=first["trace_id"],
@@ -61,12 +58,14 @@ class InMemoryEventRepository(EventRepository):
         started = datetime.now(UTC)
         prev = self._deliveries.get(event.delivery_id)
         seq = prev.get("last_processed_seq", 0) if prev else 0
+        rev = (prev.get("revision", 0) if prev else 0) + 1
         self._deliveries[event.delivery_id] = {
             "delivery_id": event.delivery_id,
             "status": status,
             "last_updated_at": event.occurred_at,
             "metadata": event.payload,
             "last_processed_seq": seq,
+            "revision": rev,
             "open_pipeline_idempotency_key": idempotency_key,
             "open_pipeline_started_at": started,
         }
@@ -155,6 +154,7 @@ class InMemoryEventRepository(EventRepository):
         d["open_pipeline_idempotency_key"] = None
         d["open_pipeline_started_at"] = None
         d["last_processed_seq"] = d.get("last_processed_seq", 0) + 1
+        d["revision"] = d.get("revision", 0) + 1
 
     async def find_stale_open_pipeline_delivery_ids(
         self,
@@ -188,6 +188,9 @@ class InMemoryEventRepository(EventRepository):
         return rows[:limit]
 
     async def append_voice_outcome(self, outcome: VoiceSessionOutcome) -> None:
+        row = self._deliveries.get(outcome.delivery_id)
+        if row is not None:
+            row["revision"] = row.get("revision", 0) + 1
         self._voice.append(
             {
                 "delivery_id": outcome.delivery_id,
