@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from ais.ingest import idempotency_key_from_parts, normalize_ingest_body
 from ais.ingest.ingress_envelope import envelope_to_json
+from ais.planner import run_intervention_planner
 from ais.repositories import EventRepository, IngestOutcome
 from ais.watchtower import run_watchtower
 
@@ -40,6 +41,10 @@ class DeliveryDetailResponse(BaseModel):
     watchtower_decisions: list[dict[str, Any]] = Field(
         default_factory=list,
         alias="watchtowerDecisions",
+    )
+    intervention_plans: list[dict[str, Any]] = Field(
+        default_factory=list,
+        alias="interventionPlans",
     )
 
     model_config = {"populate_by_name": True}
@@ -85,7 +90,11 @@ async def post_delivery_event(request: Request, repo: Repo) -> IngestResponse:
         trace_id=trace_id,
     )
     if not out.duplicate:
-        await run_watchtower(repo, out.delivery_id)
+        decision = await run_watchtower(repo, out.delivery_id)
+        if decision is not None:
+            s = getattr(request.app.state, "settings", None)
+            cooldown = getattr(s, "intervention_cooldown_seconds", 300) if s is not None else 300
+            await run_intervention_planner(repo, decision, cooldown_seconds=cooldown)
     return IngestResponse(
         accepted=not out.duplicate,
         duplicate=out.duplicate,
@@ -104,8 +113,10 @@ async def get_delivery_detail(delivery_id: str, repo: Repo) -> DeliveryDetailRes
         raise HTTPException(status_code=404, detail="Delivery not found")
     events = await repo.list_events_for_delivery(delivery_id)
     decisions = await repo.list_watchtower_decisions(delivery_id)
+    plans = await repo.list_intervention_plans(delivery_id)
     return DeliveryDetailResponse(
         delivery=d.model_dump(by_alias=True, mode="json"),
         events=events,
         watchtowerDecisions=decisions,
+        interventionPlans=plans,
     )

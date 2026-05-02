@@ -1,6 +1,7 @@
 from dataclasses import dataclass
+from datetime import datetime
 
-from ais.models import Delivery, NormalizedEvent, WatchtowerDecision
+from ais.models import Delivery, InterventionPlan, NormalizedEvent, WatchtowerDecision
 
 
 @dataclass(frozen=True)
@@ -34,4 +35,13 @@ class EventRepository:
         raise NotImplementedError
 
     async def list_watchtower_decisions(self, delivery_id: str, limit: int = 20) -> list[dict]:
+        raise NotImplementedError
+
+    async def append_intervention_plan(self, plan: InterventionPlan) -> None:
+        raise NotImplementedError
+
+    async def last_intervention_planned_at(self, delivery_id: str) -> datetime | None:
+        raise NotImplementedError
+
+    async def list_intervention_plans(self, delivery_id: str, limit: int = 20) -> list[dict]:
         raise NotImplementedError

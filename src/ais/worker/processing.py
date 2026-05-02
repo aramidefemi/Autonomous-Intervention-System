@@ -9,6 +9,7 @@ from pydantic import ValidationError
 
 from ais.ingest import normalize_ingest_body
 from ais.ingest.ingress_envelope import parse_envelope_json
+from ais.planner import run_intervention_planner
 from ais.repositories import EventRepository
 from ais.sqs.client import ReceivedMessage, SqsClient
 from ais.watchtower import run_watchtower
@@ -25,6 +26,7 @@ async def process_ingress_message(
     repo: EventRepository,
     msg: ReceivedMessage,
     max_receive_before_dlq: int,
+    intervention_cooldown_seconds: int = 300,
 ) -> ProcessResult:
     """Normalize + persist; invalid validation → DLQ; transient error → requeue via visibility."""
     ingress_url = sqs.ingress_queue_url
@@ -50,7 +52,13 @@ async def process_ingress_message(
             trace_id=trace_id,
         )
         if not outcome.duplicate:
-            await run_watchtower(repo, outcome.delivery_id)
+            decision = await run_watchtower(repo, outcome.delivery_id)
+            if decision is not None:
+                await run_intervention_planner(
+                    repo,
+                    decision,
+                    cooldown_seconds=intervention_cooldown_seconds,
+                )
     except Exception:
         if msg.receive_count >= max_receive_before_dlq:
             await sqs.send_dlq(raw)

@@ -4,7 +4,7 @@ from typing import Any
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from pymongo.errors import DuplicateKeyError
 
-from ais.models import Delivery, NormalizedEvent, WatchtowerDecision
+from ais.models import Delivery, InterventionPlan, NormalizedEvent, WatchtowerDecision
 from ais.repositories.contracts import EventRepository, IngestOutcome
 
 
@@ -48,12 +48,26 @@ def _watchtower_doc(decision: WatchtowerDecision) -> dict[str, Any]:
     }
 
 
+def _intervention_doc(plan: InterventionPlan) -> dict[str, Any]:
+    return {
+        "delivery_id": plan.delivery_id,
+        "intervention_type": plan.intervention_type.value,
+        "reason": plan.reason,
+        "status": plan.status,
+        "planned_at": plan.planned_at,
+        "watchtower_risk": plan.watchtower_risk.value,
+        "watchtower_reason": plan.watchtower_reason,
+        "source": plan.source,
+    }
+
+
 class MongoEventRepository(EventRepository):
     def __init__(self, db: AsyncIOMotorDatabase) -> None:
         self._db = db
         self._events = db["events"]
         self._deliveries = db["deliveries"]
         self._watchtower = db["watchtower_decisions"]
+        self._interventions = db["interventions"]
 
     async def ensure_indexes(self) -> None:
         await self._events.create_index("idempotency_key", unique=True)
@@ -61,6 +75,8 @@ class MongoEventRepository(EventRepository):
         await self._deliveries.create_index("delivery_id", unique=True)
         await self._watchtower.create_index("delivery_id")
         await self._watchtower.create_index([("delivery_id", 1), ("decided_at", -1)])
+        await self._interventions.create_index("delivery_id")
+        await self._interventions.create_index([("delivery_id", 1), ("planned_at", -1)])
 
     async def ingest_event(
         self,
@@ -138,5 +154,33 @@ class MongoEventRepository(EventRepository):
             doc.pop("_id", None)
             if isinstance(doc.get("decided_at"), datetime):
                 doc["decided_at"] = doc["decided_at"].isoformat()
+            out.append(doc)
+        return out
+
+    async def append_intervention_plan(self, plan: InterventionPlan) -> None:
+        await self._interventions.insert_one(_intervention_doc(plan))
+
+    async def last_intervention_planned_at(self, delivery_id: str) -> datetime | None:
+        doc = await self._interventions.find_one(
+            {"delivery_id": delivery_id},
+            sort=[("planned_at", -1)],
+            projection={"planned_at": 1},
+        )
+        if not doc:
+            return None
+        at = doc.get("planned_at")
+        return at if isinstance(at, datetime) else None
+
+    async def list_intervention_plans(self, delivery_id: str, limit: int = 20) -> list[dict]:
+        cur = (
+            self._interventions.find({"delivery_id": delivery_id})
+            .sort("planned_at", -1)
+            .limit(limit)
+        )
+        out: list[dict] = []
+        async for doc in cur:
+            doc.pop("_id", None)
+            if isinstance(doc.get("planned_at"), datetime):
+                doc["planned_at"] = doc["planned_at"].isoformat()
             out.append(doc)
         return out

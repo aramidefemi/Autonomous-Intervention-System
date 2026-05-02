@@ -67,3 +67,29 @@ class WatchtowerDecision(BaseModel):
     )
 
     model_config = {"populate_by_name": True}
+
+
+class InterventionType(StrEnum):
+    CALL_RIDER = "call_rider"
+    CALL_CUSTOMER = "call_customer"
+    WAIT = "wait"
+    ESCALATE = "escalate"
+    REASSIGN = "reassign"
+
+
+class InterventionPlan(BaseModel):
+    """Planner output: proposed next action for a delivery (append-only)."""
+
+    delivery_id: str = Field(..., min_length=1, alias="deliveryId")
+    intervention_type: InterventionType = Field(..., alias="interventionType")
+    reason: str = Field(..., min_length=1)
+    status: str = Field(default="pending")
+    planned_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        alias="plannedAt",
+    )
+    watchtower_risk: RiskLevel = Field(..., alias="watchtowerRisk")
+    watchtower_reason: str = Field(..., min_length=1, alias="watchtowerReason")
+    source: str = Field(default="rules")
+
+    model_config = {"populate_by_name": True}

@@ -1,6 +1,8 @@
 from ais.models.contracts import (
     AgentDecision,
     Delivery,
+    InterventionPlan,
+    InterventionType,
     NormalizedEvent,
     RiskLevel,
     WatchtowerDecision,
@@ -9,6 +11,8 @@ from ais.models.contracts import (
 __all__ = [
     "AgentDecision",
     "Delivery",
+    "InterventionPlan",
+    "InterventionType",
     "NormalizedEvent",
     "RiskLevel",
     "WatchtowerDecision",

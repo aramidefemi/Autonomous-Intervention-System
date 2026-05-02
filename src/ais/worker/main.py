@@ -33,6 +33,7 @@ async def run_one_cycle(*, settings: Settings, sqs: SqsClient, repo: EventReposi
                 repo=repo,
                 msg=msg,
                 max_receive_before_dlq=settings.sqs_max_receive_before_dlq,
+                intervention_cooldown_seconds=settings.intervention_cooldown_seconds,
             )
             n += 1
         except Exception:

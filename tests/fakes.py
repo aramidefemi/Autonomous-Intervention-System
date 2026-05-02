@@ -1,4 +1,6 @@
-from ais.models import Delivery, NormalizedEvent, WatchtowerDecision
+from datetime import datetime
+
+from ais.models import Delivery, InterventionPlan, NormalizedEvent, WatchtowerDecision
 from ais.repositories.contracts import EventRepository, IngestOutcome
 
 
@@ -9,6 +11,7 @@ class InMemoryEventRepository(EventRepository):
         self._events: dict[str, dict] = {}
         self._deliveries: dict[str, dict] = {}
         self._watchtower: list[dict] = []
+        self._interventions: list[dict] = []
 
     async def ensure_indexes(self) -> None:
         return
@@ -80,4 +83,31 @@ class InMemoryEventRepository(EventRepository):
     async def list_watchtower_decisions(self, delivery_id: str, limit: int = 20) -> list[dict]:
         rows = [r for r in self._watchtower if r["delivery_id"] == delivery_id]
         rows.sort(key=lambda x: x["decided_at"], reverse=True)
+        return rows[:limit]
+
+    async def append_intervention_plan(self, plan: InterventionPlan) -> None:
+        self._interventions.append(
+            {
+                "delivery_id": plan.delivery_id,
+                "intervention_type": plan.intervention_type.value,
+                "reason": plan.reason,
+                "status": plan.status,
+                "planned_at": plan.planned_at,
+                "watchtower_risk": plan.watchtower_risk.value,
+                "watchtower_reason": plan.watchtower_reason,
+                "source": plan.source,
+            }
+        )
+
+    async def last_intervention_planned_at(self, delivery_id: str) -> datetime | None:
+        rows = [r for r in self._interventions if r["delivery_id"] == delivery_id]
+        if not rows:
+            return None
+        rows.sort(key=lambda x: x["planned_at"], reverse=True)
+        at = rows[0]["planned_at"]
+        return at if isinstance(at, datetime) else None
+
+    async def list_intervention_plans(self, delivery_id: str, limit: int = 20) -> list[dict]:
+        rows = [r for r in self._interventions if r["delivery_id"] == delivery_id]
+        rows.sort(key=lambda x: x["planned_at"], reverse=True)
         return rows[:limit]

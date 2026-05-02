@@ -31,6 +31,12 @@ class Settings(BaseSettings):
         le=1000,
         alias="SQS_MAX_RECEIVE_BEFORE_DLQ",
     )
+    intervention_cooldown_seconds: int = Field(
+        default=300,
+        ge=0,
+        le=86400,
+        alias="INTERVENTION_COOLDOWN_SECONDS",
+    )
 
     @field_validator("app_port")
     @classmethod
