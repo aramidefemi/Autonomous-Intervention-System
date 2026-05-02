@@ -9,10 +9,9 @@ from pydantic import ValidationError
 
 from ais.ingest import normalize_ingest_body
 from ais.ingest.ingress_envelope import parse_envelope_json
-from ais.planner import run_intervention_planner
+from ais.pipeline import run_post_ingest_pipeline
 from ais.repositories import EventRepository
 from ais.sqs.client import ReceivedMessage, SqsClient
-from ais.watchtower import run_watchtower
 from ais.watchtower.evaluator import WatchtowerEvaluator
 
 
@@ -53,18 +52,14 @@ async def process_ingress_message(
             event=event,
             trace_id=trace_id,
         )
-        if not outcome.duplicate:
-            decision = await run_watchtower(
+        if (not outcome.duplicate) or outcome.resume_pipeline:
+            await run_post_ingest_pipeline(
                 repo,
                 outcome.delivery_id,
-                evaluator=watchtower_evaluator,
+                envelope.idempotency_key,
+                watchtower_evaluator=watchtower_evaluator,
+                intervention_cooldown_seconds=intervention_cooldown_seconds,
             )
-            if decision is not None:
-                await run_intervention_planner(
-                    repo,
-                    decision,
-                    cooldown_seconds=intervention_cooldown_seconds,
-                )
     except Exception:
         if msg.receive_count >= max_receive_before_dlq:
             await sqs.send_dlq(raw)

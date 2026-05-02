@@ -6,9 +6,8 @@ from pydantic import BaseModel, Field, ValidationError
 
 from ais.ingest import idempotency_key_from_parts, normalize_ingest_body
 from ais.ingest.ingress_envelope import envelope_to_json
-from ais.planner import run_intervention_planner
+from ais.pipeline import run_post_ingest_pipeline
 from ais.repositories import EventRepository, IngestOutcome
-from ais.watchtower import run_watchtower
 
 router = APIRouter(prefix="/v1", tags=["events"])
 
@@ -93,15 +92,20 @@ async def post_delivery_event(request: Request, repo: Repo) -> IngestResponse:
         event=event,
         trace_id=trace_id,
     )
-    if not out.duplicate:
+    if (not out.duplicate) or out.resume_pipeline:
         ev = getattr(request.app.state, "watchtower_evaluator", None)
-        decision = await run_watchtower(repo, out.delivery_id, evaluator=ev)
-        if decision is not None:
-            s = getattr(request.app.state, "settings", None)
-            cooldown = getattr(s, "intervention_cooldown_seconds", 300) if s is not None else 300
-            await run_intervention_planner(repo, decision, cooldown_seconds=cooldown)
+        s = getattr(request.app.state, "settings", None)
+        cooldown = getattr(s, "intervention_cooldown_seconds", 300) if s is not None else 300
+        await run_post_ingest_pipeline(
+            repo,
+            out.delivery_id,
+            idem_key,
+            watchtower_evaluator=ev,
+            intervention_cooldown_seconds=cooldown,
+        )
+    processed = (not out.duplicate) or out.resume_pipeline
     return IngestResponse(
-        accepted=not out.duplicate,
+        accepted=processed,
         duplicate=out.duplicate,
         queued=False,
         trace_id=out.trace_id,

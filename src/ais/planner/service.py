@@ -14,11 +14,22 @@ async def run_intervention_planner(
     *,
     now: datetime | None = None,
     cooldown_seconds: int = 300,
+    ingest_idempotency_key: str | None = None,
 ) -> InterventionPlan | None:
     t = now if now is not None else datetime.now(UTC)
+    if ingest_idempotency_key:
+        existing_plan = await repo.get_intervention_plan_for_ingest_key(
+            decision.delivery_id, ingest_idempotency_key
+        )
+        if existing_plan is not None:
+            return existing_plan
     candidate = intervention_plan_from_decision(decision, planned_at=t)
     if candidate is None:
         return None
+    if ingest_idempotency_key:
+        candidate = candidate.model_copy(
+            update={"ingest_idempotency_key": ingest_idempotency_key}
+        )
     last_at = await repo.last_intervention_planned_at(decision.delivery_id)
     if is_within_cooldown(t, last_at, cooldown_seconds):
         return None

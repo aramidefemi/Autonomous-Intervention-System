@@ -130,7 +130,7 @@ This document aligns delivery work with ideas from *The Pragmatic Programmer* (t
 
 ---
 
-## Phase 6 — Recovery and consistency
+## Phase 6 — Recovery and consistency ✅
 
 **What you can run/demonstrate:** Kill the worker mid-flow; on restart, processing **resumes** without duplicate intervention (idempotent recovery).
 

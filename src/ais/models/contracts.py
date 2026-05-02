@@ -18,6 +18,26 @@ class Delivery(BaseModel):
     status: str = Field(default="unknown")
     last_updated_at: datetime | None = Field(default=None, alias="lastUpdatedAt")
     metadata: dict[str, Any] = Field(default_factory=dict)
+    last_processed_seq: int = Field(
+        default=0,
+        ge=0,
+        alias="lastProcessedSeq",
+        description="Increments when ingest→watchtower→planner completes for an envelope.",
+    )
+    open_pipeline_idempotency_key: str | None = Field(
+        default=None,
+        alias="openPipelineIdempotencyKey",
+        description="Set while downstream pipeline may not have finished (at-least-once recovery).",
+    )
+    open_pipeline_started_at: datetime | None = Field(
+        default=None,
+        alias="openPipelineStartedAt",
+    )
+    open_intervention_id: str | None = Field(
+        default=None,
+        alias="openInterventionId",
+        description="Reserved for in-flight voice/intervention linkage.",
+    )
 
     model_config = {"populate_by_name": True}
 
@@ -65,6 +85,11 @@ class WatchtowerDecision(BaseModel):
         default_factory=lambda: datetime.now(UTC),
         alias="decidedAt",
     )
+    ingest_idempotency_key: str | None = Field(
+        default=None,
+        alias="ingestIdempotencyKey",
+        description="When set, dedupes replay of the same queued ingest envelope.",
+    )
 
     model_config = {"populate_by_name": True}
 
@@ -91,6 +116,11 @@ class InterventionPlan(BaseModel):
     watchtower_risk: RiskLevel = Field(..., alias="watchtowerRisk")
     watchtower_reason: str = Field(..., min_length=1, alias="watchtowerReason")
     source: str = Field(default="rules")
+    ingest_idempotency_key: str | None = Field(
+        default=None,
+        alias="ingestIdempotencyKey",
+        description="When set, prevents duplicate plans from pipeline retries.",
+    )
 
     model_config = {"populate_by_name": True}
 

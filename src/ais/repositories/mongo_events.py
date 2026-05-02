@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
@@ -11,6 +11,7 @@ from ais.models import (
     VoiceSessionOutcome,
     WatchtowerDecision,
 )
+from ais.recovery.checkpoint import delivery_has_stale_open_pipeline
 from ais.repositories.contracts import EventRepository, IngestOutcome
 
 
@@ -44,7 +45,7 @@ def _delivery_update_from_event(event: NormalizedEvent) -> dict[str, Any]:
 
 
 def _watchtower_doc(decision: WatchtowerDecision) -> dict[str, Any]:
-    return {
+    d: dict[str, Any] = {
         "delivery_id": decision.delivery_id,
         "risk": decision.risk.value,
         "reason": decision.reason,
@@ -52,10 +53,13 @@ def _watchtower_doc(decision: WatchtowerDecision) -> dict[str, Any]:
         "source": decision.source,
         "decided_at": decision.decided_at,
     }
+    if decision.ingest_idempotency_key:
+        d["ingest_idempotency_key"] = decision.ingest_idempotency_key
+    return d
 
 
 def _intervention_doc(plan: InterventionPlan) -> dict[str, Any]:
-    return {
+    d: dict[str, Any] = {
         "delivery_id": plan.delivery_id,
         "intervention_type": plan.intervention_type.value,
         "reason": plan.reason,
@@ -65,6 +69,9 @@ def _intervention_doc(plan: InterventionPlan) -> dict[str, Any]:
         "watchtower_reason": plan.watchtower_reason,
         "source": plan.source,
     }
+    if plan.ingest_idempotency_key:
+        d["ingest_idempotency_key"] = plan.ingest_idempotency_key
+    return d
 
 
 def _voice_outcome_doc(outcome: VoiceSessionOutcome) -> dict[str, Any]:
@@ -97,8 +104,18 @@ class MongoEventRepository(EventRepository):
         await self._deliveries.create_index("delivery_id", unique=True)
         await self._watchtower.create_index("delivery_id")
         await self._watchtower.create_index([("delivery_id", 1), ("decided_at", -1)])
+        await self._watchtower.create_index(
+            [("delivery_id", 1), ("ingest_idempotency_key", 1)],
+            unique=True,
+            partialFilterExpression={"ingest_idempotency_key": {"$type": "string"}},
+        )
         await self._interventions.create_index("delivery_id")
         await self._interventions.create_index([("delivery_id", 1), ("planned_at", -1)])
+        await self._interventions.create_index(
+            [("delivery_id", 1), ("ingest_idempotency_key", 1)],
+            unique=True,
+            partialFilterExpression={"ingest_idempotency_key": {"$type": "string"}},
+        )
         await self._voice.create_index("delivery_id")
         await self._voice.create_index([("delivery_id", 1), ("received_at", -1)])
 
@@ -122,14 +139,24 @@ class MongoEventRepository(EventRepository):
                 projection={"trace_id": 1},
             )
             tid = (existing or {}).get("trace_id") or trace_id
+            del_row = await self._deliveries.find_one(
+                {"delivery_id": event.delivery_id},
+                projection={"open_pipeline_idempotency_key": 1},
+            )
+            resume = (
+                del_row is not None
+                and del_row.get("open_pipeline_idempotency_key") == idempotency_key
+            )
             return IngestOutcome(
                 duplicate=True,
                 trace_id=tid,
                 delivery_id=event.delivery_id,
                 idempotency_key=idempotency_key,
+                resume_pipeline=resume,
             )
 
         upd = _delivery_update_from_event(event)
+        started = datetime.now(UTC)
         await self._deliveries.update_one(
             {"delivery_id": event.delivery_id},
             {
@@ -137,8 +164,10 @@ class MongoEventRepository(EventRepository):
                     "status": upd["status"],
                     "last_updated_at": upd["last_updated_at"],
                     "metadata": upd["metadata"],
+                    "open_pipeline_idempotency_key": idempotency_key,
+                    "open_pipeline_started_at": started,
                 },
-                "$setOnInsert": {"delivery_id": event.delivery_id},
+                "$setOnInsert": {"delivery_id": event.delivery_id, "last_processed_seq": 0},
             },
             upsert=True,
         )
@@ -167,7 +196,25 @@ class MongoEventRepository(EventRepository):
         return out
 
     async def append_watchtower_decision(self, decision: WatchtowerDecision) -> None:
-        await self._watchtower.insert_one(_watchtower_doc(decision))
+        try:
+            await self._watchtower.insert_one(_watchtower_doc(decision))
+        except DuplicateKeyError:
+            if not decision.ingest_idempotency_key:
+                raise
+
+    async def get_watchtower_decision_for_ingest_key(
+        self, delivery_id: str, ingest_idempotency_key: str
+    ) -> WatchtowerDecision | None:
+        row = await self._watchtower.find_one(
+            {
+                "delivery_id": delivery_id,
+                "ingest_idempotency_key": ingest_idempotency_key,
+            }
+        )
+        if not row:
+            return None
+        row.pop("_id", None)
+        return WatchtowerDecision.model_validate(row)
 
     async def list_watchtower_decisions(self, delivery_id: str, limit: int = 20) -> list[dict]:
         cur = (
@@ -182,7 +229,75 @@ class MongoEventRepository(EventRepository):
         return out
 
     async def append_intervention_plan(self, plan: InterventionPlan) -> None:
-        await self._interventions.insert_one(_intervention_doc(plan))
+        if plan.ingest_idempotency_key:
+            dup = await self._interventions.find_one(
+                {
+                    "delivery_id": plan.delivery_id,
+                    "ingest_idempotency_key": plan.ingest_idempotency_key,
+                }
+            )
+            if dup is not None:
+                return
+        try:
+            await self._interventions.insert_one(_intervention_doc(plan))
+        except DuplicateKeyError:
+            if not plan.ingest_idempotency_key:
+                raise
+
+    async def get_intervention_plan_for_ingest_key(
+        self, delivery_id: str, ingest_idempotency_key: str
+    ) -> InterventionPlan | None:
+        row = await self._interventions.find_one(
+            {
+                "delivery_id": delivery_id,
+                "ingest_idempotency_key": ingest_idempotency_key,
+            }
+        )
+        if not row:
+            return None
+        row.pop("_id", None)
+        return InterventionPlan.model_validate(row)
+
+    async def complete_pipeline(self, delivery_id: str, idempotency_key: str) -> None:
+        await self._deliveries.update_one(
+            {
+                "delivery_id": delivery_id,
+                "open_pipeline_idempotency_key": idempotency_key,
+            },
+            {
+                "$unset": {"open_pipeline_idempotency_key": "", "open_pipeline_started_at": ""},
+                "$inc": {"last_processed_seq": 1},
+            },
+        )
+
+    async def find_stale_open_pipeline_delivery_ids(
+        self,
+        *,
+        stale_after_seconds: int,
+        now: datetime | None = None,
+    ) -> list[str]:
+        t = now if now is not None else datetime.now(UTC)
+        cur = self._deliveries.find(
+            {"open_pipeline_idempotency_key": {"$exists": True, "$ne": None}},
+            projection={
+                "delivery_id": 1,
+                "open_pipeline_idempotency_key": 1,
+                "open_pipeline_started_at": 1,
+            },
+        )
+        out: list[str] = []
+        async for doc in cur:
+            if not delivery_has_stale_open_pipeline(
+                open_pipeline_idempotency_key=doc.get("open_pipeline_idempotency_key"),
+                open_pipeline_started_at=doc.get("open_pipeline_started_at"),
+                now=t,
+                stale_after_seconds=stale_after_seconds,
+            ):
+                continue
+            did = doc.get("delivery_id")
+            if isinstance(did, str):
+                out.append(did)
+        return out
 
     async def last_intervention_planned_at(self, delivery_id: str) -> datetime | None:
         doc = await self._interventions.find_one(
