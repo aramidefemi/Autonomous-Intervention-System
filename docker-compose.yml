@@ -1,0 +1,57 @@
+# Phase 0a: MongoDB + LocalStack (SQS). Ports: Mongo 27017, LocalStack 4566.
+# `sqs-init` runs once after LocalStack is healthy and creates ingress + DLQ.
+services:
+  mongo:
+    image: mongo:7
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - watchtower
+
+  localstack:
+    image: localstack/localstack:3
+    ports:
+      - "4566:4566"
+    environment:
+      SERVICES: sqs
+      DEBUG: "0"
+    volumes:
+      - localstack_data:/var/lib/localstack
+    networks:
+      - watchtower
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:4566/_localstack/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+      start_period: 10s
+
+  sqs-init:
+    image: amazon/aws-cli:2.15.64
+    depends_on:
+      localstack:
+        condition: service_healthy
+    environment:
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_DEFAULT_REGION: eu-west-1
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        for q in watchtower-ingress watchtower-ingress-dlq; do
+          aws --endpoint-url=http://localstack:4566 sqs create-queue --queue-name "$$q" || true
+        done
+    networks:
+      - watchtower
+    restart: "no"
+
+volumes:
+  mongo_data:
+  localstack_data:
+
+networks:
+  watchtower:
+    driver: bridge

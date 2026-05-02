@@ -26,11 +26,13 @@ This document aligns delivery work with ideas from *The Pragmatic Programmer* (t
 
 ---
 
-## Phase 0 — Docker environment, LocalStack, Mongo, FastAPI bootstrap, and contracts
+## Phase 0 — Docker environment, LocalStack, Mongo, FastAPI bootstrap, and contracts ✅
 
-**Stack (backend):** Python 3.12+ · **FastAPI** · **Uvicorn** · **Motor** or **PyMongo** (async Mongo) · **boto3** / **aioboto3** (SQS against LocalStack) · **Docker** / **Docker Compose** · **LocalStack** (SQS) · **MongoDB** · **Pydantic** / **pydantic-settings** · dev: **pytest**, **pytest-asyncio**, **httpx**, **ruff** (or Ruff + formatter).
+**Stack (backend):** Python 3.11+ (CI 3.12) · **FastAPI** · **Uvicorn** · **Motor** or **PyMongo** (async Mongo) · **boto3** / **aioboto3** (SQS against LocalStack) · **Docker** / **Docker Compose** · **LocalStack** (SQS) · **MongoDB** · **Pydantic** / **pydantic-settings** · dev: **pytest**, **pytest-asyncio**, **httpx**, **ruff** (or Ruff + formatter).
 
-**What you can run/demonstrate:** `docker compose up` starts **MongoDB** + **LocalStack** (SQS); optional one-shot init creates queues; **FastAPI** runs locally (or in a compose service) with **`GET /health`**; Python deps installed via **`uv`** or **`pip`** + **`pyproject.toml`**; `.env.example` documents URLs; **lint + unit tests** pass in CI.
+**What you can run/demonstrate:** `docker compose up` starts **MongoDB** + **LocalStack** (SQS) and **`sqs-init`** creates **ingress + DLQ**; **FastAPI** runs on the host with **`uvicorn ais.main:app`** and **`GET /health`**; copy **`.env.example` → `.env`**; **lint + unit tests** in CI (PR). **Repo layout:** Python package under **`src/ais/`** (config, `app` factory, `models/`, `routes/`); tests in **`tests/`** (optional **`tests/integration/`** for LocalStack).
+
+**API documentation (OpenAPI / “Swagger”):** see [docs/openapi-plan.md](openapi-plan.md) for how we expose `/openapi.json`, `/docs`, and future contract publishing.
 
 ### Phase 0a — Infrastructure & API shell
 

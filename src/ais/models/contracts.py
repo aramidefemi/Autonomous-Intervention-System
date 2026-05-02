@@ -1,0 +1,46 @@
+from datetime import UTC, datetime
+from typing import Any
+
+from pydantic import BaseModel, Field, model_validator
+
+from ais.versioning import assert_supported_schema_version
+
+
+class Delivery(BaseModel):
+    delivery_id: str = Field(..., min_length=1, alias="deliveryId")
+    status: str = Field(default="unknown")
+    last_updated_at: datetime | None = Field(default=None, alias="lastUpdatedAt")
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    model_config = {"populate_by_name": True}
+
+
+class NormalizedEvent(BaseModel):
+    delivery_id: str = Field(..., min_length=1, alias="deliveryId")
+    event_type: str = Field(..., min_length=1, alias="eventType")
+    schema_version: int = Field(..., ge=1, alias="schemaVersion")
+    occurred_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        alias="occurredAt",
+    )
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+    model_config = {"populate_by_name": True}
+
+    @model_validator(mode="after")
+    def supported_schema(self) -> "NormalizedEvent":
+        assert_supported_schema_version(self.schema_version)
+        return self
+
+
+class AgentDecision(BaseModel):
+    delivery_id: str = Field(..., min_length=1, alias="deliveryId")
+    agent_name: str = Field(..., min_length=1, alias="agentName")
+    summary: str = Field(default="")
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    decided_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        alias="decidedAt",
+    )
+
+    model_config = {"populate_by_name": True}

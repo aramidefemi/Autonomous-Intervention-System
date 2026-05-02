@@ -1,0 +1,51 @@
+[project]
+name = "ais"
+version = "0.1.0"
+description = "AI Delivery Watchtower API"
+readme = "readme.md"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.32",
+  "motor>=3.6",
+  "pydantic-settings>=2.6",
+  "aioboto3>=13.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "pytest-asyncio>=0.24",
+  "httpx>=0.27",
+  "ruff>=0.8",
+  "asgi-lifespan>=2.1",
+]
+
+[project.scripts]
+ais-worker = "ais.worker.main:main"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-m 'not integration'"
+markers = [
+  "integration: needs Mongo + LocalStack (docker compose)",
+]
+
+[tool.pytest_asyncio]
+asyncio_default_fixture_loop_scope = "function"
