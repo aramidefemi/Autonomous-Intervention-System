@@ -56,3 +56,11 @@ def test_loads_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     s = Settings()
     assert s.mongo_uri == "mongodb://envhost:27017"
     assert s.app_port == 9000
+
+
+def test_watchtower_graph_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MONGO_URI", "mongodb://x")
+    monkeypatch.setenv("AIS_WATCHTOWER_GRAPH", "1")
+    assert Settings().watchtower_graph_enabled is True
+    monkeypatch.setenv("AIS_WATCHTOWER_GRAPH", "0")
+    assert Settings().watchtower_graph_enabled is False

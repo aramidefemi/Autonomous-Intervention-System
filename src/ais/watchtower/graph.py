@@ -1,4 +1,4 @@
-"""LangGraph orchestration for watchtower: rules gate, optional LLM chain, single persisted decision."""
+"""LangGraph watchtower: rules gate, optional LLM chain, one persisted decision."""
 
 from __future__ import annotations
 
