@@ -45,6 +45,7 @@ async def test_stale_event_yields_call_rider_plan() -> None:
         aws_endpoint_url=None,
         queue_ingress=False,
         intervention_cooldown_seconds=600,
+        nvidia_api_key=None,  # rules-only; .env key would use LLM (non-deterministic)
     )
     app = create_app(settings)
 
@@ -104,6 +105,7 @@ async def test_second_tick_same_delivery_respects_cooldown() -> None:
         aws_endpoint_url=None,
         queue_ingress=False,
         intervention_cooldown_seconds=3600,
+        nvidia_api_key=None,
     )
     app = create_app(settings)
 

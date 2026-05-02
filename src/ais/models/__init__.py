@@ -7,6 +7,7 @@ from ais.models.contracts import (
     NormalizedEvent,
     RiskLevel,
     VoiceSessionOutcome,
+    WatchtowerAction,
     WatchtowerDecision,
 )
 
@@ -19,5 +20,6 @@ __all__ = [
     "NormalizedEvent",
     "RiskLevel",
     "VoiceSessionOutcome",
+    "WatchtowerAction",
     "WatchtowerDecision",
 ]

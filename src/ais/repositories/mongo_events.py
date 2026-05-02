@@ -49,10 +49,13 @@ def _watchtower_doc(decision: WatchtowerDecision) -> dict[str, Any]:
         "delivery_id": decision.delivery_id,
         "risk": decision.risk.value,
         "reason": decision.reason,
+        "action": decision.action.value,
         "signals": decision.signals,
         "source": decision.source,
         "decided_at": decision.decided_at,
     }
+    if decision.action_reason:
+        d["action_reason"] = decision.action_reason
     if decision.ingest_idempotency_key:
         d["ingest_idempotency_key"] = decision.ingest_idempotency_key
     return d
@@ -80,6 +83,7 @@ def _voice_outcome_doc(outcome: VoiceSessionOutcome) -> dict[str, Any]:
         "room_name": outcome.room_name,
         "transcript": outcome.transcript,
         "issue_type": outcome.issue_type.value,
+        "action_point": outcome.action_point,
         "structured": outcome.structured,
         "lifecycle": outcome.lifecycle,
         "source": outcome.source,
@@ -186,6 +190,27 @@ class MongoEventRepository(EventRepository):
         row.pop("_id", None)
         return Delivery.model_validate(row)
 
+    async def list_delivery_summaries(self, limit: int = 100) -> list[dict]:
+        cur = (
+            self._deliveries.find(
+                {},
+                projection={"delivery_id": 1, "status": 1, "last_updated_at": 1},
+            )
+            .sort("last_updated_at", -1)
+            .limit(limit)
+        )
+        out: list[dict] = []
+        async for doc in cur:
+            la = doc.get("last_updated_at")
+            item: dict[str, Any] = {
+                "deliveryId": doc["delivery_id"],
+                "status": doc.get("status") or "unknown",
+            }
+            if isinstance(la, datetime):
+                item["lastUpdatedAt"] = la.isoformat()
+            out.append(item)
+        return out
+
     async def list_events_for_delivery(self, delivery_id: str, limit: int = 50) -> list[dict]:
         cur = self._events.find({"delivery_id": delivery_id}).sort("occurred_at", 1).limit(limit)
         out: list[dict] = []
@@ -224,9 +249,8 @@ class MongoEventRepository(EventRepository):
         out: list[dict] = []
         async for doc in cur:
             doc.pop("_id", None)
-            if isinstance(doc.get("decided_at"), datetime):
-                doc["decided_at"] = doc["decided_at"].isoformat()
-            out.append(doc)
+            row = WatchtowerDecision.model_validate(doc)
+            out.append(row.model_dump(by_alias=True, mode="json"))
         return out
 
     async def append_intervention_plan(self, plan: InterventionPlan) -> None:

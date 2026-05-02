@@ -11,7 +11,12 @@ from pydantic import ValidationError
 
 from ais.ingest import normalize_ingest_body
 from ais.ingest.ingress_envelope import parse_envelope_json
-from ais.logging_config import bind_correlation_id, reset_correlation_id
+from ais.logging_config import (
+    bind_correlation_id,
+    bind_trace_id,
+    reset_correlation_id,
+    reset_trace_id,
+)
 from ais.pipeline import run_post_ingest_pipeline
 from ais.repositories import EventRepository
 from ais.sqs.client import ReceivedMessage, SqsClient
@@ -53,34 +58,38 @@ async def process_ingress_message(
             await sqs.delete_message(queue_url=ingress_url, receipt_handle=msg.receipt_handle)
             return ProcessResult.SENT_TO_DLQ
 
+        token_tr = bind_trace_id(trace_id)
         try:
-            outcome = await repo.ingest_event(
-                idempotency_key=envelope.idempotency_key,
-                event=event,
-                trace_id=trace_id,
-            )
-            if (not outcome.duplicate) or outcome.resume_pipeline:
-                await run_post_ingest_pipeline(
-                    repo,
-                    outcome.delivery_id,
-                    envelope.idempotency_key,
-                    watchtower_evaluator=watchtower_evaluator,
-                    intervention_cooldown_seconds=intervention_cooldown_seconds,
+            try:
+                outcome = await repo.ingest_event(
+                    idempotency_key=envelope.idempotency_key,
+                    event=event,
+                    trace_id=trace_id,
                 )
-            logger.info(
-                "worker ingested delivery_id=%s duplicate=%s idempotency_key=%s",
-                outcome.delivery_id,
-                outcome.duplicate,
-                envelope.idempotency_key,
-            )
-        except Exception:
-            if msg.receive_count >= max_receive_before_dlq:
-                await sqs.send_dlq(raw)
-                await sqs.delete_message(queue_url=ingress_url, receipt_handle=msg.receipt_handle)
-                return ProcessResult.SENT_TO_DLQ
-            raise
+                if (not outcome.duplicate) or outcome.resume_pipeline:
+                    await run_post_ingest_pipeline(
+                        repo,
+                        outcome.delivery_id,
+                        envelope.idempotency_key,
+                        watchtower_evaluator=watchtower_evaluator,
+                        intervention_cooldown_seconds=intervention_cooldown_seconds,
+                    )
+                logger.info(
+                    "worker ingested delivery_id=%s duplicate=%s idempotency_key=%s",
+                    outcome.delivery_id,
+                    outcome.duplicate,
+                    envelope.idempotency_key,
+                )
+            except Exception:
+                if msg.receive_count >= max_receive_before_dlq:
+                    await sqs.send_dlq(raw)
+                    await sqs.delete_message(queue_url=ingress_url, receipt_handle=msg.receipt_handle)
+                    return ProcessResult.SENT_TO_DLQ
+                raise
 
-        await sqs.delete_message(queue_url=ingress_url, receipt_handle=msg.receipt_handle)
-        return ProcessResult.DELETED
+            await sqs.delete_message(queue_url=ingress_url, receipt_handle=msg.receipt_handle)
+            return ProcessResult.DELETED
+        finally:
+            reset_trace_id(token_tr)
     finally:
         reset_correlation_id(token)

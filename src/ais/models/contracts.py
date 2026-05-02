@@ -13,6 +13,17 @@ class RiskLevel(StrEnum):
     HIGH = "high"
 
 
+class WatchtowerAction(StrEnum):
+    """Recommended ops step from watchtower (execution may be deferred)."""
+
+    NONE = "none"
+    WAIT = "wait"
+    CALL_RIDER = "call_rider"
+    CALL_CUSTOMER = "call_customer"
+    ESCALATE = "escalate"
+    REASSIGN = "reassign"
+
+
 class Delivery(BaseModel):
     delivery_id: str = Field(..., min_length=1, alias="deliveryId")
     status: str = Field(default="unknown")
@@ -84,6 +95,15 @@ class WatchtowerDecision(BaseModel):
     delivery_id: str = Field(..., min_length=1, alias="deliveryId")
     risk: RiskLevel
     reason: str = Field(..., min_length=1)
+    action: WatchtowerAction = Field(
+        default=WatchtowerAction.NONE,
+        description="Recommended next step; persisted to Mongo as action.",
+    )
+    action_reason: str = Field(
+        default="",
+        alias="actionReason",
+        description="Why this action (may be empty for rules-only codes).",
+    )
     signals: dict[str, Any] = Field(default_factory=dict)
     source: str = Field(default="rules", description="rules | llm | ...")
     decided_at: datetime = Field(
@@ -146,6 +166,7 @@ class VoiceSessionOutcome(BaseModel):
     room_name: str = Field(..., min_length=1, alias="roomName")
     transcript: str = ""
     issue_type: IssueType = Field(..., alias="issueType")
+    action_point: str = Field(default="", alias="actionPoint")
     structured: dict[str, Any] = Field(default_factory=dict)
     lifecycle: str = Field(default="completed", description="VoiceLifecycleState value")
     source: str = Field(default="livekit_webhook")

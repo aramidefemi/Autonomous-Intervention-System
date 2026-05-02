@@ -44,6 +44,7 @@ async def test_stale_event_produces_decision_with_risk_and_reason() -> None:
         mongo_database=db_name,
         aws_endpoint_url=None,
         queue_ingress=False,
+        nvidia_api_key=None,  # rules-only; .env key would use LLM (non-deterministic)
     )
     app = create_app(settings)
 
@@ -71,6 +72,7 @@ async def test_stale_event_produces_decision_with_risk_and_reason() -> None:
                 latest = body["watchtowerDecisions"][0]
                 assert latest["risk"] == "high"
                 assert latest["reason"] == "stale_update"
+                assert latest["action"] == "call_rider"
                 assert "stalenessSeconds" in latest["signals"]
 
             mc = app.state.mongo_client

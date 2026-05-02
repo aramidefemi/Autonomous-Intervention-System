@@ -13,6 +13,7 @@ from ais.models import (
     NormalizedEvent,
     RiskLevel,
     VoiceSessionOutcome,
+    WatchtowerAction,
     WatchtowerDecision,
 )
 
@@ -52,11 +53,13 @@ def test_watchtower_decision_round_trip() -> None:
         deliveryId="D-1",
         risk=RiskLevel.LOW,
         reason="nominal",
+        action=WatchtowerAction.NONE,
         signals={"stalenessSeconds": 1.0},
     )
     data = w.model_dump(by_alias=True, mode="json")
     w2 = WatchtowerDecision.model_validate(data)
     assert w2.risk == RiskLevel.LOW
+    assert w2.action == WatchtowerAction.NONE
     assert w2.signals["stalenessSeconds"] == 1.0
 
 

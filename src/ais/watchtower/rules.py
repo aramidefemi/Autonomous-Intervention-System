@@ -1,6 +1,6 @@
 """Deterministic rules over signals → WatchtowerDecision."""
 
-from ais.models import RiskLevel, WatchtowerDecision
+from ais.models import RiskLevel, WatchtowerAction, WatchtowerDecision
 from ais.watchtower.signals import WatchtowerSignals
 
 STALE_AFTER_SECONDS = 300.0
@@ -21,6 +21,8 @@ def decide_from_rules(signals: WatchtowerSignals, *, delivery_id: str) -> Watcht
             deliveryId=delivery_id,
             risk=RiskLevel.HIGH,
             reason="stale_update",
+            action=WatchtowerAction.CALL_RIDER,
+            action_reason="contact_rider_stale_location",
             signals=snap,
             source="rules",
         )
@@ -29,6 +31,8 @@ def decide_from_rules(signals: WatchtowerSignals, *, delivery_id: str) -> Watcht
             deliveryId=delivery_id,
             risk=RiskLevel.MEDIUM,
             reason="eta_slipped",
+            action=WatchtowerAction.WAIT,
+            action_reason="monitor_after_eta_slip",
             signals=snap,
             source="rules",
         )
@@ -36,6 +40,8 @@ def decide_from_rules(signals: WatchtowerSignals, *, delivery_id: str) -> Watcht
         deliveryId=delivery_id,
         risk=RiskLevel.LOW,
         reason="nominal",
+        action=WatchtowerAction.NONE,
+        action_reason="",
         signals=snap,
         source="rules",
     )

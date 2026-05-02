@@ -1,6 +1,8 @@
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 from motor.motor_asyncio import AsyncIOMotorClient
 
 from ais.config import Settings
@@ -56,4 +58,7 @@ def create_app(
     app.include_router(events_routes.router)
     app.include_router(voice_routes.router)
     app.add_middleware(CorrelationIdMiddleware)
+    _audit = Path(__file__).resolve().parent.parent.parent / "static" / "audit"
+    if _audit.is_dir():
+        app.mount("/audit", StaticFiles(directory=str(_audit), html=True), name="audit")
     return app

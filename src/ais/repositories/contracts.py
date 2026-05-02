@@ -79,3 +79,7 @@ class EventRepository:
 
     async def list_voice_outcomes(self, delivery_id: str, limit: int = 20) -> list[dict]:
         raise NotImplementedError
+
+    async def list_delivery_summaries(self, limit: int = 100) -> list[dict]:
+        """Sidebar index: each row has deliveryId, status, lastUpdatedAt (ISO string or omitted)."""
+        raise NotImplementedError

@@ -11,7 +11,7 @@ from typing import Any, NamedTuple
 from openai import OpenAI
 
 from ais.config import Settings
-from ais.models import Delivery, RiskLevel, WatchtowerDecision
+from ais.models import Delivery, RiskLevel, WatchtowerAction, WatchtowerDecision
 from ais.watchtower.evaluator import WatchtowerEvaluator
 from ais.watchtower.rules import decide_from_rules, signals_snapshot
 from ais.watchtower.signals import WatchtowerSignals
@@ -20,7 +20,9 @@ logger = logging.getLogger(__name__)
 
 _STREAM_SYSTEM = (
     "You are the AI Delivery Watchtower. Given delivery signals, respond with JSON only: "
-    '{"risk":"low"|"medium"|"high","reason":"<short reason>"}. '
+    '{"risk":"low"|"medium"|"high","reason":"<risk assessment>",'
+    '"action":"none"|"wait"|"call_rider"|"call_customer"|"escalate"|"reassign",'
+    '"action_reason":"<why this action>"}. '
     "No markdown fences."
 )
 
@@ -106,11 +108,61 @@ def _parse_risk(value: object) -> RiskLevel | None:
     return None
 
 
+def merge_watchtower_risk_with_rules(
+    rules_d: WatchtowerDecision,
+    llm_d: WatchtowerDecision,
+) -> RiskLevel:
+    """Blend LLM with rules: never undercut rules; cap overshoot *for eta_slip* at medium (rules tier)."""
+    order = (RiskLevel.LOW, RiskLevel.MEDIUM, RiskLevel.HIGH)
+    r_i = max(order.index(rules_d.risk), order.index(llm_d.risk))
+    if rules_d.reason == "eta_slipped":
+        r_i = min(r_i, order.index(RiskLevel.MEDIUM))
+    return order[r_i]
+
+
+def _parse_action(value: object) -> WatchtowerAction | None:
+    if not isinstance(value, str):
+        return None
+    key = value.strip().lower()
+    for a in WatchtowerAction:
+        if a.value == key:
+            return a
+    return None
+
+
+def coerce_watchtower_action(
+    merged_risk: RiskLevel,
+    rules_d: WatchtowerDecision,
+    parsed: WatchtowerDecision,
+) -> WatchtowerAction:
+    """After risk merge, pick an action consistent with tier and rule overrides."""
+    if merged_risk == RiskLevel.LOW:
+        return WatchtowerAction.NONE
+    if merged_risk == RiskLevel.MEDIUM:
+        return WatchtowerAction.WAIT
+    if rules_d.risk == RiskLevel.HIGH:
+        return rules_d.action
+    if parsed.action != WatchtowerAction.NONE:
+        return parsed.action
+    return WatchtowerAction.ESCALATE
+
+
+def _merged_action_reason(
+    action: WatchtowerAction,
+    parsed: WatchtowerDecision,
+    rules_d: WatchtowerDecision,
+) -> str:
+    if action == rules_d.action and rules_d.action_reason:
+        return rules_d.action_reason
+    return parsed.action_reason
+
+
 def parse_watchtower_llm_json(
     text: str,
     *,
     delivery_id: str,
     signals_snapshot: dict[str, Any],
+    rules_fallback: WatchtowerDecision | None = None,
 ) -> WatchtowerDecision | None:
     """Parse model output into WatchtowerDecision; None if unparseable."""
     data: dict[str, Any] | None = None
@@ -128,10 +180,22 @@ def parse_watchtower_llm_json(
     reason = data.get("reason")
     if risk is None or not isinstance(reason, str) or not reason.strip():
         return None
+    act = _parse_action(data.get("action"))
+    if act is None and rules_fallback is not None:
+        act = rules_fallback.action
+    elif act is None:
+        act = WatchtowerAction.NONE
+    ar_raw = data.get("action_reason") or data.get("actionReason")
+    if isinstance(ar_raw, str):
+        ar = ar_raw.strip()
+    else:
+        ar = (rules_fallback.action_reason if rules_fallback else "") or ""
     return WatchtowerDecision(
         deliveryId=delivery_id,
         risk=risk,
         reason=reason.strip(),
+        action=act,
+        action_reason=ar,
         signals=signals_snapshot,
         source="llm",
     )
@@ -188,8 +252,25 @@ class NvidiaWatchtowerEvaluator:
             return (comp.choices[0].message.content or "").strip()
 
         text = await asyncio.to_thread(_sync_call)
-        parsed = parse_watchtower_llm_json(text, delivery_id=delivery_id, signals_snapshot=snap)
+        rules_d = decide_from_rules(signals, delivery_id=delivery_id)
+        parsed = parse_watchtower_llm_json(
+            text,
+            delivery_id=delivery_id,
+            signals_snapshot=snap,
+            rules_fallback=rules_d,
+        )
         if parsed is not None:
-            return parsed
+            merged_risk = merge_watchtower_risk_with_rules(rules_d, parsed)
+            merged_action = coerce_watchtower_action(merged_risk, rules_d, parsed)
+            ar = _merged_action_reason(merged_action, parsed, rules_d)
+            return WatchtowerDecision(
+                deliveryId=delivery_id,
+                risk=merged_risk,
+                reason=parsed.reason,
+                action=merged_action,
+                action_reason=ar,
+                signals=snap,
+                source="llm",
+            )
         logger.warning("watchtower LLM parse failed; using rules. raw_len=%s", len(text))
-        return decide_from_rules(signals, delivery_id=delivery_id)
+        return rules_d

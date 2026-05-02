@@ -40,9 +40,13 @@ async def test_voice_callback_persists_and_lists(app) -> None:
             },
         )
         assert r.status_code == 200
-        assert r.json()["issueType"] == "mechanical_failure"
+        j = r.json()
+        assert j["issueType"] == "mechanical_failure"
+        assert "actionPoint" in j
+        assert len(j["actionPoint"]) > 0
         g = await client.get("/v1/deliveries/D-voice")
         vo = g.json()["voiceOutcomes"]
         assert len(vo) == 1
         assert vo[0]["issue_type"] == "mechanical_failure"
+        assert vo[0].get("action_point")
         assert "broke down" in vo[0]["transcript"]

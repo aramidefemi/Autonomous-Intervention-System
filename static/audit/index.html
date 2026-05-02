@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Watchtower — Audit</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --panel: #1a2332;
+      --border: #2d3a4d;
+      --text: #e6edf3;
+      --muted: #8b9cb3;
+      --accent: #58a6ff;
+      --risk-low: #3fb950;
+      --risk-med: #d29922;
+      --risk-high: #f85149;
+      --intervention: #a371f7;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    header {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: baseline;
+      gap: 12px;
+    }
+    header h1 { margin: 0; font-size: 1.1rem; font-weight: 600; }
+    header span { font-size: 0.8rem; color: var(--muted); }
+    .layout {
+      flex: 1;
+      display: flex;
+      min-height: 0;
+    }
+    nav {
+      width: 280px;
+      border-right: 1px solid var(--border);
+      overflow: auto;
+      background: var(--panel);
+    }
+    nav button {
+      display: block;
+      width: 100%;
+      text-align: left;
+      padding: 10px 14px;
+      border: none;
+      border-bottom: 1px solid var(--border);
+      background: transparent;
+      color: var(--text);
+      cursor: pointer;
+      font-size: 0.85rem;
+    }
+    nav button:hover { background: rgba(88, 166, 255, 0.08); }
+    nav button.active {
+      background: rgba(88, 166, 255, 0.15);
+      border-left: 3px solid var(--accent);
+      padding-left: 11px;
+    }
+    nav .id { font-family: ui-monospace, monospace; font-size: 0.8rem; word-break: break-all; }
+    nav .meta { color: var(--muted); font-size: 0.75rem; margin-top: 4px; }
+    main {
+      flex: 1;
+      overflow: auto;
+      padding: 16px 20px;
+    }
+    .empty { color: var(--muted); padding: 24px; }
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-size: 0.8rem;
+    }
+    .card label { color: var(--muted); display: block; font-size: 0.7rem; text-transform: uppercase; }
+    .timeline { position: relative; padding-left: 20px; }
+    .timeline::before {
+      content: "";
+      position: absolute;
+      left: 6px;
+      top: 0;
+      bottom: 0;
+      width: 2px;
+      background: var(--border);
+    }
+    .entry {
+      position: relative;
+      margin-bottom: 16px;
+      padding: 12px 14px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      margin-left: 8px;
+    }
+    .entry::before {
+      content: "";
+      position: absolute;
+      left: -18px;
+      top: 16px;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--border);
+      border: 2px solid var(--bg);
+    }
+    .entry.ingest::before { background: var(--muted); }
+    .entry.watchtower::before { background: var(--accent); }
+    .entry.intervention::before { background: var(--intervention); }
+    .entry.voice::before { background: var(--risk-low); }
+    .entry.intervention.hot {
+      border-color: var(--intervention);
+      box-shadow: 0 0 0 1px rgba(163, 113, 247, 0.25);
+    }
+    .entry .time { font-size: 0.75rem; color: var(--muted); margin-bottom: 8px; }
+    .entry .kind {
+      display: inline-block;
+      font-size: 0.65rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 0.7rem;
+      font-weight: 600;
+      margin-right: 6px;
+    }
+    .risk-low { background: rgba(63, 185, 80, 0.2); color: var(--risk-low); }
+    .risk-medium { background: rgba(210, 153, 34, 0.2); color: var(--risk-med); }
+    .risk-high { background: rgba(248, 81, 73, 0.2); color: var(--risk-high); }
+    .json-toggle {
+      margin-top: 8px;
+      font-size: 0.75rem;
+      color: var(--accent);
+      cursor: pointer;
+      user-select: none;
+    }
+    pre {
+      margin: 8px 0 0;
+      padding: 10px;
+      background: #0d1117;
+      border-radius: 6px;
+      overflow: auto;
+      font-size: 0.7rem;
+      max-height: 200px;
+      display: none;
+    }
+    pre.open { display: block; }
+    .err { color: var(--risk-high); font-size: 0.85rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Watchtower audit</h1>
+    <span>Deliveries · traces · interventions · voice</span>
+  </header>
+  <div class="layout">
+    <nav id="sidebar"><div class="empty" id="side-status">Loading…</div></nav>
+    <main id="main"><div class="empty">Select a delivery</div></main>
+  </div>
+  <script>
+    const $ = (sel) => document.querySelector(sel);
+
+    function pick(obj, ...keys) {
+      for (const k of keys) {
+        if (obj != null && obj[k] !== undefined && obj[k] !== null) return obj[k];
+      }
+      return undefined;
+    }
+
+    function riskClass(r) {
+      if (r === "high") return "risk-high";
+      if (r === "medium") return "risk-medium";
+      return "risk-low";
+    }
+
+    function parseTime(iso) {
+      if (!iso) return 0;
+      const t = Date.parse(iso);
+      return Number.isNaN(t) ? 0 : t;
+    }
+
+    function isHotIntervention(row) {
+      const t = pick(row, "interventionType", "intervention_type");
+      return t && t !== "wait";
+    }
+
+    function isHotWatchtower(row) {
+      const a = pick(row, "action");
+      return a && a !== "none" && a !== "wait";
+    }
+
+    async function loadSidebar() {
+      const el = $("#sidebar");
+      try {
+        const r = await fetch("/v1/deliveries?limit=200");
+        if (!r.ok) throw new Error(r.statusText);
+        const { items } = await r.json();
+        if (!items.length) {
+          el.innerHTML = '<div class="empty">No deliveries yet</div>';
+          return;
+        }
+        el.innerHTML = "";
+        for (const row of items) {
+          const id = row.deliveryId;
+          const b = document.createElement("button");
+          b.type = "button";
+          b.innerHTML =
+            '<div class="id">' +
+            id +
+            "</div><div class=\"meta\">" +
+            (row.status || "") +
+            (row.lastUpdatedAt ? " · " + row.lastUpdatedAt.slice(0, 19).replace("T", " ") : "") +
+            "</div>";
+          b.addEventListener("click", () => selectDelivery(id, b));
+          el.appendChild(b);
+        }
+      } catch (e) {
+        el.innerHTML = '<div class="err">Failed to load list</div>';
+      }
+    }
+
+    function togglePre(btn) {
+      const pre = btn.nextElementSibling;
+      pre.classList.toggle("open");
+      btn.textContent = pre.classList.contains("open") ? "Hide raw" : "Show raw";
+    }
+
+    function buildTimeline(detail) {
+      const points = [];
+      for (const ev of detail.events || []) {
+        const at = pick(ev, "occurred_at", "occurredAt");
+        points.push({
+          sort: parseTime(at),
+          html: () => {
+            const et = pick(ev, "eventType", "event_type") || "event";
+            return (
+              '<div class="entry ingest"><div class="kind">Ingest</div>' +
+              '<div class="time">' +
+              (at || "?") +
+              "</div>" +
+              "<div><strong>" +
+              et +
+              "</strong></div>" +
+              '<div class="json-toggle" onclick="togglePre(this)">Show raw</div>' +
+              "<pre>" +
+              JSON.stringify(ev, null, 2) +
+              "</pre></div>"
+            );
+          },
+        });
+      }
+      for (const wt of detail.watchtowerDecisions || []) {
+        const at = pick(wt, "decidedAt", "decided_at");
+        const risk = pick(wt, "risk") || "low";
+        const action = pick(wt, "action") || "";
+        const reason = pick(wt, "reason") || "";
+        const ar = pick(wt, "actionReason", "action_reason") || "";
+        const src = pick(wt, "source") || "";
+        const hot = isHotWatchtower(wt);
+        points.push({
+          sort: parseTime(at),
+          html: () =>
+            '<div class="entry watchtower' +
+            (hot ? " hot" : "") +
+            '"><div class="kind">Watchtower</div>' +
+            '<div class="time">' +
+            (at || "?") +
+            "</div>" +
+            '<span class="badge ' +
+            riskClass(risk) +
+            '">' +
+            risk +
+            "</span>" +
+            '<span class="badge" style="background:#21262d">' +
+            action +
+            "</span>" +
+            (src ? '<span class="badge" style="background:#21262d">' + src + "</span>" : "") +
+            "<p style=\"margin:8px 0 0;font-size:0.85rem;line-height:1.4\">" +
+            reason +
+            "</p>" +
+            (ar ? '<p style="margin:6px 0 0;font-size:0.8rem;color:var(--muted)">' + ar + "</p>" : "") +
+            '<div class="json-toggle" onclick="togglePre(this)">Full decision (JSON)</div>' +
+            "<pre>" +
+            JSON.stringify(wt, null, 2) +
+            "</pre></div>",
+        });
+      }
+      for (const p of detail.interventionPlans || []) {
+        const at = pick(p, "plannedAt", "planned_at");
+        const it = pick(p, "interventionType", "intervention_type");
+        const hot = isHotIntervention(p);
+        points.push({
+          sort: parseTime(at),
+          html: () =>
+            '<div class="entry intervention' +
+            (hot ? " hot" : "") +
+            '"><div class="kind">Intervention plan</div>' +
+            '<div class="time">' +
+            (at || "?") +
+            "</div>" +
+            '<span class="badge" style="background:rgba(163,113,247,0.25);color:var(--intervention)">' +
+            (it || "?") +
+            "</span>" +
+            "<p style=\"margin:8px 0 0;font-size:0.85rem\">" +
+            (pick(p, "reason") || "") +
+            "</p>" +
+            '<p style="margin:6px 0 0;font-size:0.75rem;color:var(--muted)">watchtower: ' +
+            (pick(p, "watchtowerRisk", "watchtower_risk") || "") +
+            " — " +
+            (pick(p, "watchtowerReason", "watchtower_reason") || "") +
+            "</p>" +
+            '<div class="json-toggle" onclick="togglePre(this)">Show raw</div>' +
+            "<pre>" +
+            JSON.stringify(p, null, 2) +
+            "</pre></div>",
+        });
+      }
+      for (const v of detail.voiceOutcomes || []) {
+        const at = pick(v, "receivedAt", "received_at");
+        points.push({
+          sort: parseTime(at),
+          html: () =>
+            '<div class="entry voice"><div class="kind">Voice</div>' +
+            '<div class="time">' +
+            (at || "?") +
+            "</div>" +
+            "<p style=\"font-size:0.85rem;margin:0\">" +
+            (pick(v, "transcript") || "").slice(0, 500) +
+            (pick(v, "transcript") && pick(v, "transcript").length > 500 ? "…" : "") +
+            "</p>" +
+            '<div class="json-toggle" onclick="togglePre(this)">Show raw</div>' +
+            "<pre>" +
+            JSON.stringify(v, null, 2) +
+            "</pre></div>",
+        });
+      }
+      points.sort((a, b) => a.sort - b.sort);
+      return points.map((p) => p.html()).join("");
+    }
+
+    async function selectDelivery(id, btn) {
+      document.querySelectorAll("nav button").forEach((b) => b.classList.remove("active"));
+      if (btn) btn.classList.add("active");
+      const main = $("#main");
+      main.innerHTML = '<div class="empty">Loading…</div>';
+      try {
+        const r = await fetch(
+          "/v1/deliveries/" + encodeURIComponent(id) +
+            "?events_limit=100&watchtower_limit=100&intervention_limit=100&voice_limit=50"
+        );
+        if (r.status === 404) {
+          main.innerHTML = '<div class="empty">Not found</div>';
+          return;
+        }
+        if (!r.ok) throw new Error(r.statusText);
+        const detail = await r.json();
+        const d = pick(detail, "delivery") || {};
+        const rev = pick(d, "revision", "Revision");
+        main.innerHTML =
+          '<div class="summary">' +
+          '<div class="card"><label>Delivery</label><div style="font-family:monospace;font-size:0.8rem">' +
+          id +
+          "</div></div>" +
+          '<div class="card"><label>Status</label><div>' +
+          (pick(d, "status") || "—") +
+          "</div></div>" +
+          '<div class="card"><label>Revision</label><div>' +
+          (rev != null ? rev : "—") +
+          "</div></div>" +
+          '<div class="card"><label>Pipeline</label><div style="font-size:0.75rem">' +
+          (pick(d, "lastProcessedSeq", "last_processed_seq") ?? "—") +
+          " processed</div></div>" +
+          "</div>" +
+          '<h2 style="font-size:0.95rem;margin:0 0 12px;font-weight:600">Timeline</h2>' +
+          '<div class="timeline">' +
+          buildTimeline(detail) +
+          "</div>";
+      } catch (e) {
+        main.innerHTML = '<div class="err">Failed to load detail</div>';
+      }
+    }
+
+    window.togglePre = function (btn) {
+      const pre = btn.nextElementSibling;
+      if (pre && pre.tagName === "PRE") {
+        pre.classList.toggle("open");
+        btn.textContent = pre.classList.contains("open") ? "Hide raw" : "Show raw";
+      }
+    };
+
+    loadSidebar();
+  </script>
+</body>
+</html>

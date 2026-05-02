@@ -77,6 +77,26 @@ async def test_idempotency_header_duplicates_even_if_body_differs(app) -> None:
 
 
 @pytest.mark.asyncio
+async def test_list_deliveries_after_ingest(app) -> None:
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        await client.post(
+            "/v1/events",
+            json={
+                "deliveryId": "D-list",
+                "eventType": "ping",
+                "schemaVersion": 1,
+                "payload": {"status": "in_transit"},
+            },
+        )
+        r = await client.get("/v1/deliveries")
+    assert r.status_code == 200
+    items = r.json()["items"]
+    ids = {x["deliveryId"] for x in items}
+    assert "D-list" in ids
+
+
+@pytest.mark.asyncio
 async def test_get_delivery_404(app) -> None:
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:

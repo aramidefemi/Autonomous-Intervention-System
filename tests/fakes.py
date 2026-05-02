@@ -92,10 +92,13 @@ class InMemoryEventRepository(EventRepository):
             "delivery_id": decision.delivery_id,
             "risk": decision.risk.value,
             "reason": decision.reason,
+            "action": decision.action.value,
             "signals": dict(decision.signals),
             "source": decision.source,
             "decided_at": decision.decided_at,
         }
+        if decision.action_reason:
+            d["action_reason"] = decision.action_reason
         if decision.ingest_idempotency_key:
             d["ingest_idempotency_key"] = decision.ingest_idempotency_key
         self._watchtower.append(d)
@@ -114,7 +117,11 @@ class InMemoryEventRepository(EventRepository):
     async def list_watchtower_decisions(self, delivery_id: str, limit: int = 20) -> list[dict]:
         rows = [r for r in self._watchtower if r["delivery_id"] == delivery_id]
         rows.sort(key=lambda x: x["decided_at"], reverse=True)
-        return rows[:limit]
+        out: list[dict] = []
+        for r in rows[:limit]:
+            w = WatchtowerDecision.model_validate(r)
+            out.append(w.model_dump(by_alias=True, mode="json"))
+        return out
 
     async def append_intervention_plan(self, plan: InterventionPlan) -> None:
         if plan.ingest_idempotency_key:
@@ -197,6 +204,7 @@ class InMemoryEventRepository(EventRepository):
                 "room_name": outcome.room_name,
                 "transcript": outcome.transcript,
                 "issue_type": outcome.issue_type.value,
+                "action_point": outcome.action_point,
                 "structured": dict(outcome.structured),
                 "lifecycle": outcome.lifecycle,
                 "source": outcome.source,
@@ -210,3 +218,23 @@ class InMemoryEventRepository(EventRepository):
         rows = [r for r in self._voice if r["delivery_id"] == delivery_id]
         rows.sort(key=lambda x: x["received_at"], reverse=True)
         return rows[:limit]
+
+    async def list_delivery_summaries(self, limit: int = 100) -> list[dict]:
+        rows = list(self._deliveries.values())
+
+        def _sort_key(r: dict) -> datetime:
+            t = r.get("last_updated_at")
+            return t if isinstance(t, datetime) else datetime.min.replace(tzinfo=UTC)
+
+        rows.sort(key=_sort_key, reverse=True)
+        out: list[dict] = []
+        for r in rows[:limit]:
+            la = r.get("last_updated_at")
+            item: dict = {
+                "deliveryId": r["delivery_id"],
+                "status": r.get("status") or "unknown",
+            }
+            if isinstance(la, datetime):
+                item["lastUpdatedAt"] = la.isoformat()
+            out.append(item)
+        return out

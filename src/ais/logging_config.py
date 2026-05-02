@@ -1,4 +1,4 @@
-"""Structured-ish logging: correlation id from contextvars on every log record."""
+"""Structured-ish logging: correlation + ingest trace id from contextvars on every record."""
 
 from __future__ import annotations
 
@@ -16,6 +16,9 @@ _CallNext = Callable[[Request], Awaitable[Response]]
 correlation_id_ctx: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "correlation_id", default=None
 )
+trace_id_ctx: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "trace_id", default=None
+)
 
 _configured = False
 
@@ -32,6 +35,18 @@ def reset_correlation_id(token: contextvars.Token[str | None]) -> None:
     correlation_id_ctx.reset(token)
 
 
+def get_trace_id() -> str | None:
+    return trace_id_ctx.get()
+
+
+def bind_trace_id(tid: str | None) -> contextvars.Token[str | None]:
+    return trace_id_ctx.set(tid)
+
+
+def reset_trace_id(token: contextvars.Token[str | None]) -> None:
+    trace_id_ctx.reset(token)
+
+
 def ensure_correlation_id() -> str:
     cid = get_correlation_id()
     if cid:
@@ -41,11 +56,25 @@ def ensure_correlation_id() -> str:
     return n
 
 
-class CorrelationIdFilter(logging.Filter):
+class RequestContextFilter(logging.Filter):
+    """Sets correlation_id and trace_id for the log formatter (defaults \"-\" when unset)."""
+
     def filter(self, record: logging.LogRecord) -> bool:
         if not hasattr(record, "correlation_id"):
             record.correlation_id = get_correlation_id() or "-"
+        if not hasattr(record, "trace_id"):
+            record.trace_id = get_trace_id() or "-"
         return True
+
+
+# Backwards compatibility
+CorrelationIdFilter = RequestContextFilter
+
+
+_LOG_FMT = (
+    "%(levelname)s %(name)s "
+    "[correlation_id=%(correlation_id)s trace_id=%(trace_id)s] %(message)s"
+)
 
 
 def configure_logging(level: int = logging.INFO) -> None:
@@ -57,16 +86,19 @@ def configure_logging(level: int = logging.INFO) -> None:
     root.setLevel(level)
     if not root.handlers:
         h = logging.StreamHandler()
-        fmt = logging.Formatter(
-            "%(levelname)s %(name)s [correlation_id=%(correlation_id)s] %(message)s"
-        )
-        h.setFormatter(fmt)
-        h.addFilter(CorrelationIdFilter())
+        h.setFormatter(logging.Formatter(_LOG_FMT))
+        h.addFilter(RequestContextFilter())
         root.addHandler(h)
     else:
-        for h in root.handlers:
-            if not any(isinstance(f, CorrelationIdFilter) for f in h.filters):
-                h.addFilter(CorrelationIdFilter())
+        # Uvicorn (or other hosts) already attached root handlers; do not replace their formatters.
+        # Route `ais.*` through a single handler with correlation + trace in the line.
+        ais = logging.getLogger("ais")
+        if not ais.handlers:
+            h = logging.StreamHandler()
+            h.setFormatter(logging.Formatter(_LOG_FMT))
+            h.addFilter(RequestContextFilter())
+            ais.addHandler(h)
+            ais.propagate = False
 
 
 class CorrelationIdMiddleware(BaseHTTPMiddleware):

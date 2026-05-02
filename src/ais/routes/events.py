@@ -2,13 +2,17 @@ import json
 import logging
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field, ValidationError
 
 from ais.concurrency.revision import expected_revision_allows_ingest
 from ais.ingest import idempotency_key_from_parts, normalize_ingest_body
 from ais.ingest.ingress_envelope import envelope_to_json
-from ais.logging_config import get_correlation_id
+from ais.logging_config import (
+    bind_trace_id,
+    get_correlation_id,
+    reset_trace_id,
+)
 from ais.pipeline import run_post_ingest_pipeline
 from ais.repositories import EventRepository, IngestOutcome
 
@@ -71,6 +75,20 @@ class IngestResponse(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class DeliverySummaryItem(BaseModel):
+    delivery_id: str = Field(alias="deliveryId")
+    status: str
+    last_updated_at: str | None = Field(default=None, alias="lastUpdatedAt")
+
+    model_config = {"populate_by_name": True}
+
+
+class DeliveryListResponse(BaseModel):
+    items: list[DeliverySummaryItem]
+
+    model_config = {"populate_by_name": True}
+
+
 class DeliveryDetailResponse(BaseModel):
     delivery: dict[str, Any]
     events: list[dict[str, Any]]
@@ -110,75 +128,106 @@ async def post_delivery_event(request: Request, repo: Repo) -> IngestResponse:
 
     await _guard_delivery_revision(repo, event.delivery_id, request)
 
-    if getattr(request.app.state, "queue_ingress", False):
-        sqs = getattr(request.app.state, "sqs_client", None)
-        if sqs is None:
-            raise HTTPException(status_code=503, detail="SQS ingress not configured")
-        msg_body = envelope_to_json(
-            data,
-            idem_key,
-            correlation_id=get_correlation_id(),
+    token_tr = bind_trace_id(trace_id)
+    try:
+        st = getattr(request.app.state, "settings", None)
+        if st is not None and st.event_trace_log:
+            logger.info(
+                "event_trace delivery_id=%s trace_id=%s event_type=%s idempotency_key=%s correlation_id=%s",
+                event.delivery_id,
+                trace_id,
+                event.event_type,
+                idem_key,
+                get_correlation_id() or "-",
+            )
+
+        if getattr(request.app.state, "queue_ingress", False):
+            sqs = getattr(request.app.state, "sqs_client", None)
+            if sqs is None:
+                raise HTTPException(status_code=503, detail="SQS ingress not configured")
+            msg_body = envelope_to_json(
+                data,
+                idem_key,
+                correlation_id=get_correlation_id(),
+            )
+            mid = await sqs.send_ingress_json(msg_body)
+            logger.info(
+                "queued ingress delivery_id=%s idempotency_key=%s",
+                event.delivery_id,
+                idem_key,
+            )
+            return IngestResponse(
+                accepted=True,
+                duplicate=False,
+                queued=True,
+                trace_id=trace_id,
+                delivery_id=event.delivery_id,
+                idempotency_key=idem_key,
+                message_id=mid,
+            )
+
+        out: IngestOutcome = await repo.ingest_event(
+            idempotency_key=idem_key,
+            event=event,
+            trace_id=trace_id,
         )
-        mid = await sqs.send_ingress_json(msg_body)
+        if (not out.duplicate) or out.resume_pipeline:
+            ev = getattr(request.app.state, "watchtower_evaluator", None)
+            cooldown = getattr(st, "intervention_cooldown_seconds", 300) if st is not None else 300
+            await run_post_ingest_pipeline(
+                repo,
+                out.delivery_id,
+                idem_key,
+                watchtower_evaluator=ev,
+                intervention_cooldown_seconds=cooldown,
+            )
+        processed = (not out.duplicate) or out.resume_pipeline
         logger.info(
-            "queued ingress delivery_id=%s idempotency_key=%s",
-            event.delivery_id,
-            idem_key,
+            "ingested delivery_id=%s duplicate=%s processed=%s idempotency_key=%s",
+            out.delivery_id,
+            out.duplicate,
+            processed,
+            out.idempotency_key,
         )
         return IngestResponse(
-            accepted=True,
-            duplicate=False,
-            queued=True,
-            trace_id=trace_id,
-            delivery_id=event.delivery_id,
-            idempotency_key=idem_key,
-            message_id=mid,
+            accepted=processed,
+            duplicate=out.duplicate,
+            queued=False,
+            trace_id=out.trace_id,
+            delivery_id=out.delivery_id,
+            idempotency_key=out.idempotency_key,
+            message_id=None,
         )
+    finally:
+        reset_trace_id(token_tr)
 
-    out: IngestOutcome = await repo.ingest_event(
-        idempotency_key=idem_key,
-        event=event,
-        trace_id=trace_id,
-    )
-    if (not out.duplicate) or out.resume_pipeline:
-        ev = getattr(request.app.state, "watchtower_evaluator", None)
-        s = getattr(request.app.state, "settings", None)
-        cooldown = getattr(s, "intervention_cooldown_seconds", 300) if s is not None else 300
-        await run_post_ingest_pipeline(
-            repo,
-            out.delivery_id,
-            idem_key,
-            watchtower_evaluator=ev,
-            intervention_cooldown_seconds=cooldown,
-        )
-    processed = (not out.duplicate) or out.resume_pipeline
-    logger.info(
-        "ingested delivery_id=%s duplicate=%s processed=%s idempotency_key=%s",
-        out.delivery_id,
-        out.duplicate,
-        processed,
-        out.idempotency_key,
-    )
-    return IngestResponse(
-        accepted=processed,
-        duplicate=out.duplicate,
-        queued=False,
-        trace_id=out.trace_id,
-        delivery_id=out.delivery_id,
-        idempotency_key=out.idempotency_key,
-        message_id=None,
-    )
+
+@router.get("/deliveries", response_model=DeliveryListResponse)
+async def list_deliveries(
+    repo: Repo,
+    limit: Annotated[int, Query(le=500, ge=1)] = 100,
+) -> DeliveryListResponse:
+    rows = await repo.list_delivery_summaries(limit=limit)
+    items = [DeliverySummaryItem.model_validate(r) for r in rows]
+    return DeliveryListResponse(items=items)
 
 
 @router.get("/deliveries/{delivery_id}", response_model=DeliveryDetailResponse)
-async def get_delivery_detail(delivery_id: str, repo: Repo) -> DeliveryDetailResponse:
+async def get_delivery_detail(
+    delivery_id: str,
+    repo: Repo,
+    events_limit: Annotated[int, Query(le=200, ge=1)] = 100,
+    watchtower_limit: Annotated[int, Query(le=200, ge=1)] = 100,
+    intervention_limit: Annotated[int, Query(le=200, ge=1)] = 100,
+    voice_limit: Annotated[int, Query(le=200, ge=1)] = 100,
+) -> DeliveryDetailResponse:
     d = await repo.get_delivery(delivery_id)
     if d is None:
         raise HTTPException(status_code=404, detail="Delivery not found")
-    events = await repo.list_events_for_delivery(delivery_id)
-    decisions = await repo.list_watchtower_decisions(delivery_id)
-    plans = await repo.list_intervention_plans(delivery_id)
-    voice = await repo.list_voice_outcomes(delivery_id)
+    events = await repo.list_events_for_delivery(delivery_id, limit=events_limit)
+    decisions = await repo.list_watchtower_decisions(delivery_id, limit=watchtower_limit)
+    plans = await repo.list_intervention_plans(delivery_id, limit=intervention_limit)
+    voice = await repo.list_voice_outcomes(delivery_id, limit=voice_limit)
     return DeliveryDetailResponse(
         delivery=d.model_dump(by_alias=True, mode="json"),
         events=events,

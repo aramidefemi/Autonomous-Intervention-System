@@ -37,6 +37,8 @@ class Settings(BaseSettings):
         le=86400,
         alias="INTERVENTION_COOLDOWN_SECONDS",
     )
+    # One extra INFO line per /v1/events (delivery, trace, type, idem) for terminal demos
+    event_trace_log: bool = Field(default=False, alias="AIS_EVENT_TRACE_LOG")
     # NVIDIA NIM (OpenAI-compatible); optional — watchtower uses rules when unset
     nvidia_api_key: str | None = Field(default=None, alias="NVIDIA_API_KEY")
     nvidia_base_url: str = Field(
@@ -57,6 +59,17 @@ class Settings(BaseSettings):
         alias="NVIDIA_REASONING_BUDGET",
     )
     nvidia_enable_thinking: bool = Field(default=True, alias="NVIDIA_ENABLE_THINKING")
+    # LiveKit Cloud: optional WebRTC sim. Unset disables /v1/voice/simulate/*
+    livekit_url: str | None = Field(default=None, alias="LIVEKIT_URL")
+    livekit_api_key: str | None = Field(default=None, alias="LIVEKIT_API_KEY")
+    livekit_api_secret: str | None = Field(default=None, alias="LIVEKIT_API_SECRET")
+    # ElevenLabs TTS for /v1/voice/simulate/ui when set (otherwise browser speechSynthesis)
+    elevenlabs_api_key: str | None = Field(default=None, alias="ELEVENLABS_API_KEY")
+    elevenlabs_voice_id: str | None = Field(default=None, alias="ELEVENLABS_VOICE_ID")
+    elevenlabs_model_id: str = Field(
+        default="eleven_turbo_v2_5",
+        alias="ELEVENLABS_MODEL_ID",
+    )
 
     @field_validator("app_port")
     @classmethod
@@ -80,6 +93,50 @@ class Settings(BaseSettings):
         if v is None or v == "":
             return None
         return str(v).strip() or None
+
+    @field_validator("livekit_url", mode="before")
+    @classmethod
+    def livekit_url_empty(cls, v: object) -> str | None:
+        if v is None or v == "":
+            return None
+        return str(v).strip() or None
+
+    @field_validator("livekit_api_key", mode="before")
+    @classmethod
+    def livekit_key_empty(cls, v: object) -> str | None:
+        if v is None or v == "":
+            return None
+        return str(v).strip() or None
+
+    @field_validator("livekit_api_secret", mode="before")
+    @classmethod
+    def livekit_secret_empty(cls, v: object) -> str | None:
+        if v is None or v == "":
+            return None
+        return str(v).strip() or None
+
+    @field_validator("elevenlabs_api_key", mode="before")
+    @classmethod
+    def elevenlabs_key_empty(cls, v: object) -> str | None:
+        if v is None or v == "":
+            return None
+        return str(v).strip() or None
+
+    @field_validator("elevenlabs_voice_id", mode="before")
+    @classmethod
+    def elevenlabs_voice_empty(cls, v: object) -> str | None:
+        if v is None or v == "":
+            return None
+        return str(v).strip() or None
+
+    @field_validator("event_trace_log", mode="before")
+    @classmethod
+    def event_trace_log_truthy(cls, v: object) -> bool:
+        if isinstance(v, bool):
+            return v
+        if v is None or v == "":
+            return False
+        return str(v).strip().lower() in ("1", "true", "yes", "on")
 
     @field_validator("mongo_uri")
     @classmethod
