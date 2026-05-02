@@ -1,7 +1,13 @@
 from dataclasses import dataclass
 from datetime import datetime
 
-from ais.models import Delivery, InterventionPlan, NormalizedEvent, WatchtowerDecision
+from ais.models import (
+    Delivery,
+    InterventionPlan,
+    NormalizedEvent,
+    VoiceSessionOutcome,
+    WatchtowerDecision,
+)
 
 
 @dataclass(frozen=True)
@@ -44,4 +50,10 @@ class EventRepository:
         raise NotImplementedError
 
     async def list_intervention_plans(self, delivery_id: str, limit: int = 20) -> list[dict]:
+        raise NotImplementedError
+
+    async def append_voice_outcome(self, outcome: VoiceSessionOutcome) -> None:
+        raise NotImplementedError
+
+    async def list_voice_outcomes(self, delivery_id: str, limit: int = 20) -> list[dict]:
         raise NotImplementedError

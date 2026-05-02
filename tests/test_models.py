@@ -9,8 +9,10 @@ from ais.models import (
     Delivery,
     InterventionPlan,
     InterventionType,
+    IssueType,
     NormalizedEvent,
     RiskLevel,
+    VoiceSessionOutcome,
     WatchtowerDecision,
 )
 
@@ -69,3 +71,18 @@ def test_intervention_plan_round_trip() -> None:
     data = p.model_dump(by_alias=True, mode="json")
     p2 = InterventionPlan.model_validate(data)
     assert p2.intervention_type == InterventionType.WAIT
+
+
+def test_voice_session_outcome_round_trip() -> None:
+    v = VoiceSessionOutcome(
+        deliveryId="D-1",
+        roomName="r1",
+        transcript="test",
+        issueType=IssueType.MECHANICAL_FAILURE,
+        lifecycle="completed",
+        extractionConfidence=0.9,
+        extractionMethod="keyword",
+    )
+    data = v.model_dump(by_alias=True, mode="json")
+    v2 = VoiceSessionOutcome.model_validate(data)
+    assert v2.issue_type == IssueType.MECHANICAL_FAILURE

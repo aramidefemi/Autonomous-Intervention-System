@@ -93,3 +93,32 @@ class InterventionPlan(BaseModel):
     source: str = Field(default="rules")
 
     model_config = {"populate_by_name": True}
+
+
+class IssueType(StrEnum):
+    MECHANICAL_FAILURE = "mechanical_failure"
+    TRAFFIC_DELAY = "traffic_delay"
+    WRONG_ADDRESS = "wrong_address"
+    CUSTOMER_UNREACHABLE = "customer_unreachable"
+    OTHER = "other"
+    UNKNOWN = "unknown"
+
+
+class VoiceSessionOutcome(BaseModel):
+    """Persisted voice callback: transcript + structured issue classification (append-only)."""
+
+    delivery_id: str = Field(..., min_length=1, alias="deliveryId")
+    room_name: str = Field(..., min_length=1, alias="roomName")
+    transcript: str = ""
+    issue_type: IssueType = Field(..., alias="issueType")
+    structured: dict[str, Any] = Field(default_factory=dict)
+    lifecycle: str = Field(default="completed", description="VoiceLifecycleState value")
+    source: str = Field(default="livekit_webhook")
+    extraction_confidence: float = Field(default=0.0, ge=0.0, le=1.0, alias="extractionConfidence")
+    extraction_method: str = Field(default="default", alias="extractionMethod")
+    received_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        alias="receivedAt",
+    )
+
+    model_config = {"populate_by_name": True}

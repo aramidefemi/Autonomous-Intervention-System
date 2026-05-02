@@ -1,6 +1,12 @@
 from datetime import datetime
 
-from ais.models import Delivery, InterventionPlan, NormalizedEvent, WatchtowerDecision
+from ais.models import (
+    Delivery,
+    InterventionPlan,
+    NormalizedEvent,
+    VoiceSessionOutcome,
+    WatchtowerDecision,
+)
 from ais.repositories.contracts import EventRepository, IngestOutcome
 
 
@@ -12,6 +18,7 @@ class InMemoryEventRepository(EventRepository):
         self._deliveries: dict[str, dict] = {}
         self._watchtower: list[dict] = []
         self._interventions: list[dict] = []
+        self._voice: list[dict] = []
 
     async def ensure_indexes(self) -> None:
         return
@@ -110,4 +117,25 @@ class InMemoryEventRepository(EventRepository):
     async def list_intervention_plans(self, delivery_id: str, limit: int = 20) -> list[dict]:
         rows = [r for r in self._interventions if r["delivery_id"] == delivery_id]
         rows.sort(key=lambda x: x["planned_at"], reverse=True)
+        return rows[:limit]
+
+    async def append_voice_outcome(self, outcome: VoiceSessionOutcome) -> None:
+        self._voice.append(
+            {
+                "delivery_id": outcome.delivery_id,
+                "room_name": outcome.room_name,
+                "transcript": outcome.transcript,
+                "issue_type": outcome.issue_type.value,
+                "structured": dict(outcome.structured),
+                "lifecycle": outcome.lifecycle,
+                "source": outcome.source,
+                "extraction_confidence": outcome.extraction_confidence,
+                "extraction_method": outcome.extraction_method,
+                "received_at": outcome.received_at,
+            }
+        )
+
+    async def list_voice_outcomes(self, delivery_id: str, limit: int = 20) -> list[dict]:
+        rows = [r for r in self._voice if r["delivery_id"] == delivery_id]
+        rows.sort(key=lambda x: x["received_at"], reverse=True)
         return rows[:limit]

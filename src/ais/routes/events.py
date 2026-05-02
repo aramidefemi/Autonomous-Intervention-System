@@ -46,6 +46,10 @@ class DeliveryDetailResponse(BaseModel):
         default_factory=list,
         alias="interventionPlans",
     )
+    voice_outcomes: list[dict[str, Any]] = Field(
+        default_factory=list,
+        alias="voiceOutcomes",
+    )
 
     model_config = {"populate_by_name": True}
 
@@ -90,7 +94,8 @@ async def post_delivery_event(request: Request, repo: Repo) -> IngestResponse:
         trace_id=trace_id,
     )
     if not out.duplicate:
-        decision = await run_watchtower(repo, out.delivery_id)
+        ev = getattr(request.app.state, "watchtower_evaluator", None)
+        decision = await run_watchtower(repo, out.delivery_id, evaluator=ev)
         if decision is not None:
             s = getattr(request.app.state, "settings", None)
             cooldown = getattr(s, "intervention_cooldown_seconds", 300) if s is not None else 300
@@ -114,9 +119,11 @@ async def get_delivery_detail(delivery_id: str, repo: Repo) -> DeliveryDetailRes
     events = await repo.list_events_for_delivery(delivery_id)
     decisions = await repo.list_watchtower_decisions(delivery_id)
     plans = await repo.list_intervention_plans(delivery_id)
+    voice = await repo.list_voice_outcomes(delivery_id)
     return DeliveryDetailResponse(
         delivery=d.model_dump(by_alias=True, mode="json"),
         events=events,
         watchtowerDecisions=decisions,
         interventionPlans=plans,
+        voiceOutcomes=voice,
     )

@@ -3,8 +3,10 @@ from ais.models.contracts import (
     Delivery,
     InterventionPlan,
     InterventionType,
+    IssueType,
     NormalizedEvent,
     RiskLevel,
+    VoiceSessionOutcome,
     WatchtowerDecision,
 )
 
@@ -13,7 +15,9 @@ __all__ = [
     "Delivery",
     "InterventionPlan",
     "InterventionType",
+    "IssueType",
     "NormalizedEvent",
     "RiskLevel",
+    "VoiceSessionOutcome",
     "WatchtowerDecision",
 ]

@@ -37,6 +37,26 @@ class Settings(BaseSettings):
         le=86400,
         alias="INTERVENTION_COOLDOWN_SECONDS",
     )
+    # NVIDIA NIM (OpenAI-compatible); optional — watchtower uses rules when unset
+    nvidia_api_key: str | None = Field(default=None, alias="NVIDIA_API_KEY")
+    nvidia_base_url: str = Field(
+        default="https://integrate.api.nvidia.com/v1",
+        alias="NVIDIA_BASE_URL",
+    )
+    nvidia_model: str = Field(
+        default="nvidia/nemotron-3-super-120b-a12b",
+        alias="NVIDIA_MODEL",
+    )
+    nvidia_temperature: float = Field(default=1.0, ge=0.0, le=2.0, alias="NVIDIA_TEMPERATURE")
+    nvidia_top_p: float = Field(default=0.95, ge=0.0, le=1.0, alias="NVIDIA_TOP_P")
+    nvidia_max_tokens: int = Field(default=16384, ge=1, le=131072, alias="NVIDIA_MAX_TOKENS")
+    nvidia_reasoning_budget: int = Field(
+        default=16384,
+        ge=0,
+        le=131072,
+        alias="NVIDIA_REASONING_BUDGET",
+    )
+    nvidia_enable_thinking: bool = Field(default=True, alias="NVIDIA_ENABLE_THINKING")
 
     @field_validator("app_port")
     @classmethod
@@ -53,6 +73,13 @@ class Settings(BaseSettings):
             msg = "MONGO_DATABASE must not be empty"
             raise ValueError(msg)
         return v
+
+    @field_validator("nvidia_api_key", mode="before")
+    @classmethod
+    def nvidia_key_empty(cls, v: object) -> str | None:
+        if v is None or v == "":
+            return None
+        return str(v).strip() or None
 
     @field_validator("mongo_uri")
     @classmethod
@@ -72,6 +99,14 @@ class Settings(BaseSettings):
             msg = "AWS_REGION must not be empty"
             raise ValueError(msg)
         return v
+
+    @field_validator("nvidia_base_url")
+    @classmethod
+    def nvidia_https(cls, v: str) -> str:
+        if not v.startswith("https://"):
+            msg = "NVIDIA_BASE_URL must be an https URL"
+            raise ValueError(msg)
+        return v.rstrip("/")
 
     @field_validator("aws_endpoint_url")
     @classmethod

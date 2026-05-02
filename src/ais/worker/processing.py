@@ -13,6 +13,7 @@ from ais.planner import run_intervention_planner
 from ais.repositories import EventRepository
 from ais.sqs.client import ReceivedMessage, SqsClient
 from ais.watchtower import run_watchtower
+from ais.watchtower.evaluator import WatchtowerEvaluator
 
 
 class ProcessResult(Enum):
@@ -27,6 +28,7 @@ async def process_ingress_message(
     msg: ReceivedMessage,
     max_receive_before_dlq: int,
     intervention_cooldown_seconds: int = 300,
+    watchtower_evaluator: WatchtowerEvaluator | None = None,
 ) -> ProcessResult:
     """Normalize + persist; invalid validation → DLQ; transient error → requeue via visibility."""
     ingress_url = sqs.ingress_queue_url
@@ -52,7 +54,11 @@ async def process_ingress_message(
             trace_id=trace_id,
         )
         if not outcome.duplicate:
-            decision = await run_watchtower(repo, outcome.delivery_id)
+            decision = await run_watchtower(
+                repo,
+                outcome.delivery_id,
+                evaluator=watchtower_evaluator,
+            )
             if decision is not None:
                 await run_intervention_planner(
                     repo,

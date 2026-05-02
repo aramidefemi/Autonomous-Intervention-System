@@ -4,7 +4,13 @@ from typing import Any
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from pymongo.errors import DuplicateKeyError
 
-from ais.models import Delivery, InterventionPlan, NormalizedEvent, WatchtowerDecision
+from ais.models import (
+    Delivery,
+    InterventionPlan,
+    NormalizedEvent,
+    VoiceSessionOutcome,
+    WatchtowerDecision,
+)
 from ais.repositories.contracts import EventRepository, IngestOutcome
 
 
@@ -61,6 +67,21 @@ def _intervention_doc(plan: InterventionPlan) -> dict[str, Any]:
     }
 
 
+def _voice_outcome_doc(outcome: VoiceSessionOutcome) -> dict[str, Any]:
+    return {
+        "delivery_id": outcome.delivery_id,
+        "room_name": outcome.room_name,
+        "transcript": outcome.transcript,
+        "issue_type": outcome.issue_type.value,
+        "structured": outcome.structured,
+        "lifecycle": outcome.lifecycle,
+        "source": outcome.source,
+        "extraction_confidence": outcome.extraction_confidence,
+        "extraction_method": outcome.extraction_method,
+        "received_at": outcome.received_at,
+    }
+
+
 class MongoEventRepository(EventRepository):
     def __init__(self, db: AsyncIOMotorDatabase) -> None:
         self._db = db
@@ -68,6 +89,7 @@ class MongoEventRepository(EventRepository):
         self._deliveries = db["deliveries"]
         self._watchtower = db["watchtower_decisions"]
         self._interventions = db["interventions"]
+        self._voice = db["voice_outcomes"]
 
     async def ensure_indexes(self) -> None:
         await self._events.create_index("idempotency_key", unique=True)
@@ -77,6 +99,8 @@ class MongoEventRepository(EventRepository):
         await self._watchtower.create_index([("delivery_id", 1), ("decided_at", -1)])
         await self._interventions.create_index("delivery_id")
         await self._interventions.create_index([("delivery_id", 1), ("planned_at", -1)])
+        await self._voice.create_index("delivery_id")
+        await self._voice.create_index([("delivery_id", 1), ("received_at", -1)])
 
     async def ingest_event(
         self,
@@ -182,5 +206,20 @@ class MongoEventRepository(EventRepository):
             doc.pop("_id", None)
             if isinstance(doc.get("planned_at"), datetime):
                 doc["planned_at"] = doc["planned_at"].isoformat()
+            out.append(doc)
+        return out
+
+    async def append_voice_outcome(self, outcome: VoiceSessionOutcome) -> None:
+        await self._voice.insert_one(_voice_outcome_doc(outcome))
+
+    async def list_voice_outcomes(self, delivery_id: str, limit: int = 20) -> list[dict]:
+        cur = (
+            self._voice.find({"delivery_id": delivery_id}).sort("received_at", -1).limit(limit)
+        )
+        out: list[dict] = []
+        async for doc in cur:
+            doc.pop("_id", None)
+            if isinstance(doc.get("received_at"), datetime):
+                doc["received_at"] = doc["received_at"].isoformat()
             out.append(doc)
         return out

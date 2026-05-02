@@ -8,15 +8,23 @@ import logging
 from motor.motor_asyncio import AsyncIOMotorClient
 
 from ais.config import Settings
+from ais.llm import watchtower_evaluator_from_settings
 from ais.repositories import EventRepository, MongoEventRepository
 from ais.sqs.client import SqsClient
+from ais.watchtower.evaluator import WatchtowerEvaluator
 from ais.worker.processing import process_ingress_message
 from ais.worker.retry_policy import visibility_delay_seconds
 
 logger = logging.getLogger(__name__)
 
 
-async def run_one_cycle(*, settings: Settings, sqs: SqsClient, repo: EventRepository) -> int:
+async def run_one_cycle(
+    *,
+    settings: Settings,
+    sqs: SqsClient,
+    repo: EventRepository,
+    watchtower_evaluator: WatchtowerEvaluator | None,
+) -> int:
     """Receive up to 10 messages, process; returns count handled (deleted or DLQ)."""
     await sqs.ensure_queue_urls()
     msgs = await sqs.receive_messages(
@@ -34,6 +42,7 @@ async def run_one_cycle(*, settings: Settings, sqs: SqsClient, repo: EventReposi
                 msg=msg,
                 max_receive_before_dlq=settings.sqs_max_receive_before_dlq,
                 intervention_cooldown_seconds=settings.intervention_cooldown_seconds,
+                watchtower_evaluator=watchtower_evaluator,
             )
             n += 1
         except Exception:
@@ -57,9 +66,15 @@ async def run_forever(settings: Settings | None = None) -> None:
     mc = AsyncIOMotorClient(s.mongo_uri)
     repo = MongoEventRepository(mc[s.mongo_database])
     await repo.ensure_indexes()
+    w_ev = watchtower_evaluator_from_settings(s)
     try:
         while True:
-            await run_one_cycle(settings=s, sqs=sqs_c, repo=repo)
+            await run_one_cycle(
+                settings=s,
+                sqs=sqs_c,
+                repo=repo,
+                watchtower_evaluator=w_ev,
+            )
             await asyncio.sleep(0)
     finally:
         mc.close()

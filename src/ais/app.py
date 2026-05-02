@@ -4,9 +4,11 @@ from fastapi import FastAPI
 from motor.motor_asyncio import AsyncIOMotorClient
 
 from ais.config import Settings
+from ais.llm import watchtower_evaluator_from_settings
 from ais.repositories import EventRepository, MongoEventRepository
 from ais.routes import events as events_routes
 from ais.routes import health as health_routes
+from ais.routes import voice as voice_routes
 from ais.sqs.client import SqsClient
 
 
@@ -35,6 +37,7 @@ def create_app(
             repo = MongoEventRepository(client[s.mongo_database])
             app.state.event_repository = repo
             await repo.ensure_indexes()
+        app.state.watchtower_evaluator = watchtower_evaluator_from_settings(s)
         yield
         mc = getattr(app.state, "mongo_client", None)
         if mc is not None:
@@ -49,4 +52,5 @@ def create_app(
     app.state.settings = s
     app.include_router(health_routes.router)
     app.include_router(events_routes.router)
+    app.include_router(voice_routes.router)
     return app
