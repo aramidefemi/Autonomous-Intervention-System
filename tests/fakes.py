@@ -1,4 +1,4 @@
-from ais.models import Delivery, NormalizedEvent
+from ais.models import Delivery, NormalizedEvent, WatchtowerDecision
 from ais.repositories.contracts import EventRepository, IngestOutcome
 
 
@@ -8,6 +8,7 @@ class InMemoryEventRepository(EventRepository):
     def __init__(self) -> None:
         self._events: dict[str, dict] = {}
         self._deliveries: dict[str, dict] = {}
+        self._watchtower: list[dict] = []
 
     async def ensure_indexes(self) -> None:
         return
@@ -62,4 +63,21 @@ class InMemoryEventRepository(EventRepository):
     async def list_events_for_delivery(self, delivery_id: str, limit: int = 50) -> list[dict]:
         rows = [e for e in self._events.values() if e["delivery_id"] == delivery_id]
         rows.sort(key=lambda x: x["occurred_at"])
+        return rows[:limit]
+
+    async def append_watchtower_decision(self, decision: WatchtowerDecision) -> None:
+        self._watchtower.append(
+            {
+                "delivery_id": decision.delivery_id,
+                "risk": decision.risk.value,
+                "reason": decision.reason,
+                "signals": dict(decision.signals),
+                "source": decision.source,
+                "decided_at": decision.decided_at,
+            }
+        )
+
+    async def list_watchtower_decisions(self, delivery_id: str, limit: int = 20) -> list[dict]:
+        rows = [r for r in self._watchtower if r["delivery_id"] == delivery_id]
+        rows.sort(key=lambda x: x["decided_at"], reverse=True)
         return rows[:limit]

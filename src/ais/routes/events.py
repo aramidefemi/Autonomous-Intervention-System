@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field, ValidationError
 from ais.ingest import idempotency_key_from_parts, normalize_ingest_body
 from ais.ingest.ingress_envelope import envelope_to_json
 from ais.repositories import EventRepository, IngestOutcome
+from ais.watchtower import run_watchtower
 
 router = APIRouter(prefix="/v1", tags=["events"])
 
@@ -36,6 +37,12 @@ class IngestResponse(BaseModel):
 class DeliveryDetailResponse(BaseModel):
     delivery: dict[str, Any]
     events: list[dict[str, Any]]
+    watchtower_decisions: list[dict[str, Any]] = Field(
+        default_factory=list,
+        alias="watchtowerDecisions",
+    )
+
+    model_config = {"populate_by_name": True}
 
 
 @router.post("/events", response_model=IngestResponse)
@@ -77,6 +84,8 @@ async def post_delivery_event(request: Request, repo: Repo) -> IngestResponse:
         event=event,
         trace_id=trace_id,
     )
+    if not out.duplicate:
+        await run_watchtower(repo, out.delivery_id)
     return IngestResponse(
         accepted=not out.duplicate,
         duplicate=out.duplicate,
@@ -94,7 +103,9 @@ async def get_delivery_detail(delivery_id: str, repo: Repo) -> DeliveryDetailRes
     if d is None:
         raise HTTPException(status_code=404, detail="Delivery not found")
     events = await repo.list_events_for_delivery(delivery_id)
+    decisions = await repo.list_watchtower_decisions(delivery_id)
     return DeliveryDetailResponse(
         delivery=d.model_dump(by_alias=True, mode="json"),
         events=events,
+        watchtowerDecisions=decisions,
     )

@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from ais.models import Delivery, NormalizedEvent
+from ais.models import Delivery, NormalizedEvent, WatchtowerDecision
 
 
 @dataclass(frozen=True)
@@ -28,4 +28,10 @@ class EventRepository:
         raise NotImplementedError
 
     async def list_events_for_delivery(self, delivery_id: str, limit: int = 50) -> list[dict]:
+        raise NotImplementedError
+
+    async def append_watchtower_decision(self, decision: WatchtowerDecision) -> None:
+        raise NotImplementedError
+
+    async def list_watchtower_decisions(self, delivery_id: str, limit: int = 20) -> list[dict]:
         raise NotImplementedError

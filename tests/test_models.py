@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 import pytest
 from pydantic import ValidationError
 
-from ais.models import AgentDecision, Delivery, NormalizedEvent
+from ais.models import AgentDecision, Delivery, NormalizedEvent, RiskLevel, WatchtowerDecision
 
 
 def test_delivery_round_trip() -> None:
@@ -35,3 +35,16 @@ def test_agent_decision_bounds() -> None:
             agentName="watchtower",
             confidence=1.5,
         )
+
+
+def test_watchtower_decision_round_trip() -> None:
+    w = WatchtowerDecision(
+        deliveryId="D-1",
+        risk=RiskLevel.LOW,
+        reason="nominal",
+        signals={"stalenessSeconds": 1.0},
+    )
+    data = w.model_dump(by_alias=True, mode="json")
+    w2 = WatchtowerDecision.model_validate(data)
+    assert w2.risk == RiskLevel.LOW
+    assert w2.signals["stalenessSeconds"] == 1.0

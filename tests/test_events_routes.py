@@ -15,13 +15,15 @@ async def test_post_event_accepted(app) -> None:
                 "payload": {"status": "in_transit"},
             },
         )
-    assert r.status_code == 200
-    data = r.json()
-    assert data["accepted"] is True
-    assert data["duplicate"] is False
-    assert data.get("queued") is False
-    assert data["traceId"]
-    assert data["deliveryId"] == "D99"
+        assert r.status_code == 200
+        data = r.json()
+        assert data["accepted"] is True
+        assert data["duplicate"] is False
+        assert data.get("queued") is False
+        assert data["traceId"]
+        assert data["deliveryId"] == "D99"
+        g = await client.get("/v1/deliveries/D99")
+        assert g.json()["watchtowerDecisions"]
 
 
 @pytest.mark.asyncio
@@ -43,6 +45,7 @@ async def test_duplicate_post_same_body_no_second_side_effect(app) -> None:
     assert r2.json()["duplicate"] is True
     assert r1.json()["traceId"] == r2.json()["traceId"]
     assert len(g.json()["events"]) == 1
+    assert len(g.json()["watchtowerDecisions"]) == 1
 
 
 @pytest.mark.asyncio

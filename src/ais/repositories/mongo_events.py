@@ -4,7 +4,7 @@ from typing import Any
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from pymongo.errors import DuplicateKeyError
 
-from ais.models import Delivery, NormalizedEvent
+from ais.models import Delivery, NormalizedEvent, WatchtowerDecision
 from ais.repositories.contracts import EventRepository, IngestOutcome
 
 
@@ -37,16 +37,30 @@ def _delivery_update_from_event(event: NormalizedEvent) -> dict[str, Any]:
     }
 
 
+def _watchtower_doc(decision: WatchtowerDecision) -> dict[str, Any]:
+    return {
+        "delivery_id": decision.delivery_id,
+        "risk": decision.risk.value,
+        "reason": decision.reason,
+        "signals": decision.signals,
+        "source": decision.source,
+        "decided_at": decision.decided_at,
+    }
+
+
 class MongoEventRepository(EventRepository):
     def __init__(self, db: AsyncIOMotorDatabase) -> None:
         self._db = db
         self._events = db["events"]
         self._deliveries = db["deliveries"]
+        self._watchtower = db["watchtower_decisions"]
 
     async def ensure_indexes(self) -> None:
         await self._events.create_index("idempotency_key", unique=True)
         await self._events.create_index("delivery_id")
         await self._deliveries.create_index("delivery_id", unique=True)
+        await self._watchtower.create_index("delivery_id")
+        await self._watchtower.create_index([("delivery_id", 1), ("decided_at", -1)])
 
     async def ingest_event(
         self,
@@ -109,5 +123,20 @@ class MongoEventRepository(EventRepository):
             doc.pop("_id", None)
             if isinstance(doc.get("occurred_at"), datetime):
                 doc["occurred_at"] = doc["occurred_at"].isoformat()
+            out.append(doc)
+        return out
+
+    async def append_watchtower_decision(self, decision: WatchtowerDecision) -> None:
+        await self._watchtower.insert_one(_watchtower_doc(decision))
+
+    async def list_watchtower_decisions(self, delivery_id: str, limit: int = 20) -> list[dict]:
+        cur = (
+            self._watchtower.find({"delivery_id": delivery_id}).sort("decided_at", -1).limit(limit)
+        )
+        out: list[dict] = []
+        async for doc in cur:
+            doc.pop("_id", None)
+            if isinstance(doc.get("decided_at"), datetime):
+                doc["decided_at"] = doc["decided_at"].isoformat()
             out.append(doc)
         return out

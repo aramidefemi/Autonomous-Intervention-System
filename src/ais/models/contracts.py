@@ -1,9 +1,16 @@
 from datetime import UTC, datetime
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
 from ais.versioning import assert_supported_schema_version
+
+
+class RiskLevel(StrEnum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
 
 
 class Delivery(BaseModel):
@@ -38,6 +45,22 @@ class AgentDecision(BaseModel):
     agent_name: str = Field(..., min_length=1, alias="agentName")
     summary: str = Field(default="")
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    decided_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        alias="decidedAt",
+    )
+
+    model_config = {"populate_by_name": True}
+
+
+class WatchtowerDecision(BaseModel):
+    """Rule- or LLM-backed health/risk assessment for a delivery (append-only history)."""
+
+    delivery_id: str = Field(..., min_length=1, alias="deliveryId")
+    risk: RiskLevel
+    reason: str = Field(..., min_length=1)
+    signals: dict[str, Any] = Field(default_factory=dict)
+    source: str = Field(default="rules", description="rules | llm | ...")
     decided_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),
         alias="decidedAt",

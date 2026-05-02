@@ -70,4 +70,5 @@ async def test_valid_message_deleted_after_ingest() -> None:
     )
     assert r == ProcessResult.DELETED
     assert len(repo._events) == 1  # noqa: SLF001
+    assert len(repo._watchtower) == 1  # noqa: SLF001
     sqs.delete_message.assert_awaited_once_with(queue_url="u1", receipt_handle="rh-w")

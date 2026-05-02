@@ -11,6 +11,7 @@ from ais.ingest import normalize_ingest_body
 from ais.ingest.ingress_envelope import parse_envelope_json
 from ais.repositories import EventRepository
 from ais.sqs.client import ReceivedMessage, SqsClient
+from ais.watchtower import run_watchtower
 
 
 class ProcessResult(Enum):
@@ -43,11 +44,13 @@ async def process_ingress_message(
         return ProcessResult.SENT_TO_DLQ
 
     try:
-        await repo.ingest_event(
+        outcome = await repo.ingest_event(
             idempotency_key=envelope.idempotency_key,
             event=event,
             trace_id=trace_id,
         )
+        if not outcome.duplicate:
+            await run_watchtower(repo, outcome.delivery_id)
     except Exception:
         if msg.receive_count >= max_receive_before_dlq:
             await sqs.send_dlq(raw)
