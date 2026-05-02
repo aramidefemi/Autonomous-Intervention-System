@@ -1,7 +1,12 @@
-# Phase 0a: MongoDB + LocalStack (SQS). Ports: Mongo 27017, LocalStack 4566.
-# `sqs-init` runs once after LocalStack is healthy and creates ingress + DLQ.
+# Full stack: `docker compose up --build` → LocalStack (SQS) + API.
+# SQS consumer: `docker compose --profile worker up --build`
+# MongoDB Atlas: set MONGO_URI in `.env` (omit local `mongo` — default image does not run it).
+# Optional local Mongo: `docker compose --profile local-mongo up`
+#
+# In containers, LocalStack is reached as `http://localstack:4566` (overridden below).
 services:
   mongo:
+    profiles: ["local-mongo"]
     image: mongo:7
     ports:
       - "27017:27017"
@@ -29,7 +34,7 @@ services:
       start_period: 10s
 
   sqs-init:
-    image: amazon/aws-cli:2.15.64
+    image: amazon/aws-cli:2.32.19
     depends_on:
       localstack:
         condition: service_healthy
@@ -47,6 +52,36 @@ services:
     networks:
       - watchtower
     restart: "no"
+
+  api:
+    build: .
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    env_file: .env
+    environment:
+      AWS_ENDPOINT_URL: http://localstack:4566
+    depends_on:
+      localstack:
+        condition: service_healthy
+      sqs-init:
+        condition: service_completed_successfully
+    networks:
+      - watchtower
+
+  worker:
+    profiles: ["worker"]
+    build: .
+    command: ["ais-worker"]
+    env_file: .env
+    environment:
+      AWS_ENDPOINT_URL: http://localstack:4566
+    depends_on:
+      localstack:
+        condition: service_healthy
+      sqs-init:
+        condition: service_completed_successfully
+    networks:
+      - watchtower
 
 volumes:
   mongo_data:
