@@ -26,18 +26,35 @@ This document aligns delivery work with ideas from *The Pragmatic Programmer* (t
 
 ---
 
-## Phase 0 — Project skeleton and contracts
+## Phase 0 — Docker environment, LocalStack, Mongo, FastAPI bootstrap, and contracts
 
-**What you can run/demonstrate:** `docker compose` (or scripts), API health responds, packages build, CI runs tests.
+**Stack (backend):** Python 3.12+ · **FastAPI** · **Uvicorn** · **Motor** or **PyMongo** (async Mongo) · **boto3** / **aioboto3** (SQS against LocalStack) · **Docker** / **Docker Compose** · **LocalStack** (SQS) · **MongoDB** · **Pydantic** / **pydantic-settings** · dev: **pytest**, **pytest-asyncio**, **httpx**, **ruff** (or Ruff + formatter).
+
+**What you can run/demonstrate:** `docker compose up` starts **MongoDB** + **LocalStack** (SQS); optional one-shot init creates queues; **FastAPI** runs locally (or in a compose service) with **`GET /health`**; Python deps installed via **`uv`** or **`pip`** + **`pyproject.toml`**; `.env.example` documents URLs; **lint + unit tests** pass in CI.
+
+### Phase 0a — Infrastructure & API shell
 
 | Task | Unit tests |
 |------|------------|
-| Monorepo layout (`apps/api`, `apps/worker`, `packages/core`, `packages/db`, `packages/events`) | — |
-| Shared types: `Delivery`, `NormalizedEvent`, `AgentDecision` in `packages/core` | Serialize/deserialize; reject invalid input |
-| Event versioning strategy (e.g. `eventType` + `schemaVersion`) | Version compatibility helpers |
-| Lint/format/CI script | — |
+| **Docker Compose**: services for **MongoDB** and **LocalStack**, shared network, named volumes, ports documented | — |
+| **LocalStack**: SQS enabled; **init script** or compose `depends_on` + entrypoint to create ingress queue (and DLQ name in config) | — |
+| **`pyproject.toml`** / lockfile: FastAPI, Uvicorn, Motor/PyMongo, boto3/aioboto3, pydantic-settings; dev: pytest, pytest-asyncio, httpx, ruff | — |
+| **FastAPI** app: factory pattern, **`GET /health`**, config via env (**`pydantic-settings`**: `MONGO_URI`, `AWS_ENDPOINT_URL`, region, queue names) | Settings parsing; reject invalid env combinations |
+| **`.env.example`**: Mongo URL, LocalStack endpoint, AWS dummy keys, queue names, app port | — |
+| Optional: **Dockerfile** for API service wired into Compose (or defer: run API on host against compose infra) | — |
 
-**Phase integration test:** Health checks for API (and worker if HTTP admin); full test suite green in CI.
+**Phase 0a integration test:** With Compose up, **HTTP GET `/health`** returns OK; optional **smoke** that boto3 can **list queues** against LocalStack using project config.
+
+### Phase 0b — Layout, contracts, CI
+
+| Task | Unit tests |
+|------|------------|
+| Repo layout: e.g. `src/` packages or `apps/api` + `packages/watchtower_core`—**match one tree** and document it | — |
+| Shared models: **`Delivery`**, **`NormalizedEvent`**, **`AgentDecision`** (Pydantic) | Validation errors; round-trip JSON |
+| Event versioning (`eventType`, `schemaVersion`) | Version helper logic |
+| **Ruff** + format; **pytest** in CI; workflow runs on PR | — |
+
+**Phase 0b integration test:** Same as 0a plus **full test suite green** in CI (unit tests only is fine at this gate).
 
 ---
 
@@ -55,9 +72,9 @@ This document aligns delivery work with ideas from *The Pragmatic Programmer* (t
 
 ---
 
-## Phase 2 — LocalStack SQS: async boundary
+## Phase 2 — SQS pipeline (uses LocalStack from Phase 0)
 
-**What you can run/demonstrate:** Same event via API enqueues to SQS; worker consumes and writes the same Mongo shape as Phase 1 (or an equivalent worker-only path).
+**What you can run/demonstrate:** Same event via API enqueues to **SQS** (LocalStack); worker consumes and writes the same Mongo shape as Phase 1 (or an equivalent worker-only path). **Prerequisite:** Phase **0a** Compose + queues available.
 
 | Task | Unit tests |
 |------|------------|
@@ -142,11 +159,11 @@ This document aligns delivery work with ideas from *The Pragmatic Programmer* (t
 
 | Level | Scope |
 |--------|--------|
-| **Unit** | Per-task tables above: pure functions, policies, normalizers, repos behind fakes. |
-| **Integration** | One phase gate per phase: real Mongo + LocalStack where relevant; LiveKit optional in CI. |
+| **Unit** | Per-task tables above: pure functions, policies, normalizers, repos behind fakes (**pytest** for Python). |
+| **Integration** | One phase gate per phase: **Docker Compose** Mongo + LocalStack where relevant; LiveKit optional in CI. |
 
 ---
 
 ## Suggested execution order
 
-Complete **Phase 0 → 1 → 2** in sequence (tracer + queue). Start **Phases 3–4** only after Phase 2 is green. Run a **LiveKit spike** in parallel if capacity allows, but **merge Phase 5** after Phase 4 contracts exist so voice does not own business rules.
+Complete **Phase 0a → 0b → 1 → 2** in sequence (infra + contracts, then tracer, then queue). **Phase 0a** must be done before integration tests that touch Mongo or SQS. Start **Phases 3–4** only after Phase 2 is green. Run a **LiveKit spike** in parallel if capacity allows, but **merge Phase 5** after Phase 4 contracts exist so voice does not own business rules.
